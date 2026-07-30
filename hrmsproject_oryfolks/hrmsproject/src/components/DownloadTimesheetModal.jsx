@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { X, Search, Download, Calendar, CheckSquare, Square } from "lucide-react";
+import { X, Search, Download, CheckSquare, Square } from "lucide-react";
 import api from "../utils/api";
+import DateInput from "./DateInput";
 import { toast } from "react-toastify";
 import ExcelJS from "exceljs";
 
@@ -24,6 +25,11 @@ export default function DownloadTimesheetModal({ isOpen, onClose, employees }) {
 
     const MIN_DATE = "2001-01-01";
     const MAX_DATE = "2099-12-31";
+    // Sanity bounds for the typed year (the field itself caps it at 4 digits).
+    // Kept wider than MIN_DATE so an early date still reaches getDateError and
+    // surfaces its toast instead of being silently discarded.
+    const MIN_YEAR = 1900;
+    const MAX_YEAR = 2099;
     // Returns an error message for a single date value, or null if valid.
     const getDateError = (value) => {
         if (!value) return null;
@@ -603,34 +609,30 @@ export default function DownloadTimesheetModal({ isOpen, onClose, employees }) {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-brand-blue/40 uppercase tracking-widest ml-1">From Date</label>
-                            <div className="relative">
-                                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-blue/30 w-4 h-4" />
-                                <input
-                                    type="date"
-                                    min={minFromDate}
-                                    max={MAX_DATE}
-                                    value={fromDate}
-                                    onChange={(e) => { setFromDate(e.target.value); setJoiningError(""); setInfo(""); }}
-                                    onBlur={(e) => handleDateBlur(e.target.value)}
-                                    className="w-full bg-bg-slate/50 border-2 border-transparent focus:border-brand-yellow rounded-2xl p-3.5 pl-11 text-sm font-bold text-brand-blue outline-none transition-all"
-                                />
-                            </div>
+                            <DateInput
+                                min={minFromDate}
+                                max={MAX_DATE}
+                                minYear={MIN_YEAR}
+                                maxYear={MAX_YEAR}
+                                value={fromDate}
+                                onChange={(e) => { setFromDate(e.target.value); setJoiningError(""); setInfo(""); }}
+                                onBlur={(e) => handleDateBlur(e.target.value)}
+                                className="w-full bg-bg-slate/50 border-2 border-transparent focus:border-brand-yellow rounded-2xl p-3.5 text-sm font-bold text-brand-blue outline-none transition-all"
+                            />
                             {joiningError && <p className="text-red-500 text-[12px] mt-1 ml-1">{joiningError}</p>}
                         </div>
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-brand-blue/40 uppercase tracking-widest ml-1">To Date</label>
-                            <div className="relative">
-                                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-blue/30 w-4 h-4" />
-                                <input
-                                    type="date"
-                                    min={MIN_DATE}
-                                    max={MAX_DATE}
-                                    value={toDate}
-                                    onChange={(e) => setToDate(e.target.value)}
-                                    onBlur={(e) => handleDateBlur(e.target.value)}
-                                    className="w-full bg-bg-slate/50 border-2 border-transparent focus:border-brand-yellow rounded-2xl p-3.5 pl-11 text-sm font-bold text-brand-blue outline-none transition-all"
-                                />
-                            </div>
+                            <DateInput
+                                min={MIN_DATE}
+                                max={MAX_DATE}
+                                minYear={MIN_YEAR}
+                                maxYear={MAX_YEAR}
+                                value={toDate}
+                                onChange={(e) => setToDate(e.target.value)}
+                                onBlur={(e) => handleDateBlur(e.target.value)}
+                                className="w-full bg-bg-slate/50 border-2 border-transparent focus:border-brand-yellow rounded-2xl p-3.5 text-sm font-bold text-brand-blue outline-none transition-all"
+                            />
                         </div>
                     </div>
 

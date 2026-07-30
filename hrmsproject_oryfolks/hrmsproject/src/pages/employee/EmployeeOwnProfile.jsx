@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import api from "../../utils/api";
+import DateInput, { CURRENT_YEAR } from "../../components/DateInput";
 import {
   validateName,
   validateEmail,
@@ -25,6 +26,7 @@ import "../../styles/formValidation.css";
 
 import Logo from '../../assets/ORYFOLKS-logo.png';
 import Sidebar from "../../components/Sidebar";
+import UnsavedChangesModal from "../../components/UnsavedChangesModal";
 
 const splitPhone = (phone) => {
   if (!phone) return { countryCode: "+91", number: "" };
@@ -100,10 +102,96 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
   const [user, setUser] = useState({});
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
+  const [initialForm, setInitialForm] = useState(null);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
+  const [isSavingInModal, setIsSavingInModal] = useState(false);
   const [leaveBalance, setLeaveBalance] = useState(null);
   const [fetchingBalance, setFetchingBalance] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [touched, setTouched] = useState({});
+
+  const isDirty = React.useMemo(() => {
+    if (!editing || !initialForm) return false;
+    return JSON.stringify(form) !== JSON.stringify(initialForm);
+  }, [editing, form, initialForm]);
+
+  const handleNavigate = React.useCallback((target) => {
+    if (isDirty) {
+      setPendingNavigation(() => () => {
+        if (typeof target === "function") {
+          target();
+        } else if (typeof target === "string") {
+          navigate(target);
+        } else {
+          navigate(-1);
+        }
+      });
+      setShowUnsavedModal(true);
+    } else {
+      if (typeof target === "function") {
+        target();
+      } else if (typeof target === "string") {
+        navigate(target);
+      } else {
+        navigate(-1);
+      }
+    }
+  }, [isDirty, navigate]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved changes. If you leave now, your changes will be lost.";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isDirty) {
+        window.history.pushState(null, "", window.location.href);
+        setPendingNavigation(() => () => navigate(-1));
+        setShowUnsavedModal(true);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isDirty, navigate]);
+
+  const handleModalSave = async () => {
+    setIsSavingInModal(true);
+    const success = await handleSaveProfile(true); // skip client-side validation when saving from modal
+    setIsSavingInModal(false);
+    if (success) {
+      setShowUnsavedModal(false);
+      if (pendingNavigation) {
+        const navFn = pendingNavigation;
+        setPendingNavigation(null);
+        navFn();
+      }
+    }
+  };
+
+  const handleModalDiscard = () => {
+    // Reset dirty state so guards don't fire during navigation
+    setInitialForm(JSON.parse(JSON.stringify(form)));
+    setShowUnsavedModal(false);
+    if (pendingNavigation) {
+      const navFn = pendingNavigation;
+      setPendingNavigation(null);
+      navFn();
+    }
+  };
+
+  const handleModalCancel = () => {
+    setShowUnsavedModal(false);
+    setPendingNavigation(null);
+  };
 
   useEffect(() => {
     const userData = JSON.parse(localStorage.getItem("user")) || {};
@@ -147,7 +235,7 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
       setEmployee(data);
 
       // Populate form
-      setForm({
+      const populatedForm = {
         role: data.designation || "",
         companyId: data.oryfolksId || "",
         companyMail: data.corporateEmail || "",
@@ -181,7 +269,10 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
         middleName: data.middleName || "",
         lastName: data.lastName || "",
         photoUrl: data.photoPath || "",
-      });
+      };
+
+      setForm(populatedForm);
+      setInitialForm(JSON.parse(JSON.stringify(populatedForm)));
 
       if (data.documentList) {
         const files = {
@@ -478,60 +569,62 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
     return errors;
   };
 
-  const handleSaveProfile = async () => {
-    // 1. Run validations
-    const errors = validateForm();
+  const handleSaveProfile = async (skipValidation = false) => {
+    if (!skipValidation) {
+      // 1. Run validations
+      const errors = validateForm();
 
-    // 2. Mark all as touched
-    const allTouched = {
-      firstName: true,
-      lastName: true,
-      middleName: true,
-      personalEmail: true,
-      mobile: true,
-      alternateMobile: true,
-      dob: true,
-      gender: true,
-      maritalStatus: true,
-      bloodGroup: true,
-      aadhar: true,
-      pan: true,
-      passport: true,
-      currentAddress: true,
-      permanentAddress: true,
-      emergencyContactName: true,
-      emergencyRelationship: true,
-      emergencyPhone: true,
-      emergencyAddress: true
-    };
+      // 2. Mark all as touched
+      const allTouched = {
+        firstName: true,
+        lastName: true,
+        middleName: true,
+        personalEmail: true,
+        mobile: true,
+        alternateMobile: true,
+        dob: true,
+        gender: true,
+        maritalStatus: true,
+        bloodGroup: true,
+        aadhar: true,
+        pan: true,
+        passport: true,
+        currentAddress: true,
+        permanentAddress: true,
+        emergencyContactName: true,
+        emergencyRelationship: true,
+        emergencyPhone: true,
+        emergencyAddress: true
+      };
 
-    setTouched(allTouched);
-    setFieldErrors(errors);
+      setTouched(allTouched);
+      setFieldErrors(errors);
 
-    if (Object.keys(errors).length > 0) {
-      // Find the first error field and switch to its section
-      const errorFields = Object.keys(errors);
-      let targetSection = null;
+      if (Object.keys(errors).length > 0) {
+        // Find the first error field and switch to its section
+        const errorFields = Object.keys(errors);
+        let targetSection = null;
 
-      const personalFields = ['firstName', 'lastName', 'personalEmail', 'mobile', 'alternateMobile', 'dob', 'gender', 'maritalStatus', 'bloodGroup', 'aadhar', 'pan', 'passport', 'currentAddress', 'permanentAddress'];
-      const emergencyFields = ['emergencyContactName', 'emergencyRelationship', 'emergencyPhone', 'emergencyAddress'];
+        const personalFields = ['firstName', 'lastName', 'personalEmail', 'mobile', 'alternateMobile', 'dob', 'gender', 'maritalStatus', 'bloodGroup', 'aadhar', 'pan', 'passport', 'currentAddress', 'permanentAddress'];
+        const emergencyFields = ['emergencyContactName', 'emergencyRelationship', 'emergencyPhone', 'emergencyAddress'];
 
-      if (errorFields.some(f => personalFields.includes(f))) {
-        targetSection = "personal";
-      } else if (errorFields.some(f => emergencyFields.includes(f))) {
-        targetSection = "emergency";
-      } else if (errorFields.some(f => f.startsWith('edu_'))) {
-        targetSection = "education";
-      } else if (errorFields.some(f => f.startsWith('exp_'))) {
-        targetSection = "employment";
+        if (errorFields.some(f => personalFields.includes(f))) {
+          targetSection = "personal";
+        } else if (errorFields.some(f => emergencyFields.includes(f))) {
+          targetSection = "emergency";
+        } else if (errorFields.some(f => f.startsWith('edu_'))) {
+          targetSection = "education";
+        } else if (errorFields.some(f => f.startsWith('exp_'))) {
+          targetSection = "employment";
+        }
+
+        if (targetSection) {
+          setActiveSection(targetSection);
+        }
+
+        toast.error("Please fix the validation errors before saving.");
+        return false;
       }
-
-      if (targetSection) {
-        setActiveSection(targetSection);
-      }
-
-      alert("Please fix the validation errors before saving.");
-      return;
     }
 
     try {
@@ -591,6 +684,9 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
       setEmployee((p) => ({ ...p, ...updated }));
       setEditing(false);
 
+      // Update initialForm snapshot so dirty state resets
+      setInitialForm(JSON.parse(JSON.stringify(form)));
+
       // Update localStorage for dashboard sync
       const storedUser = JSON.parse(localStorage.getItem("user")) || {};
       localStorage.setItem("user", JSON.stringify({
@@ -610,10 +706,12 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
       // persisted (server-confirmed data, including newly added education/employment rows).
       await fetchEmpData();
 
-      toast.success("Profile updated successfully");
+      toast.success("Your details have been saved successfully.");
+      return true;
     } catch (err) {
       console.error(err);
-      toast.error("Failed to update profile. Please try again.");
+      toast.error(err.message || "Failed to update profile. Please try again.");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -1007,13 +1105,25 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
 
   const activeSectionLabel = sections.find((s) => s.id === activeSection)?.label || '';
 
+  const customNavItems = React.useMemo(() => {
+    return navItems.map((item) => {
+      if (item.to) {
+        return {
+          ...item,
+          onClick: () => handleNavigate(item.to)
+        };
+      }
+      return item;
+    });
+  }, [navItems, handleNavigate]);
+
   return (
     <div className={hideSidebar ? "w-full" : "flex h-screen w-screen bg-[#e3edf9] overflow-hidden"}>
       {!hideSidebar && (
         <Sidebar
           activeTab="profile"
-          navItems={navItems}
-          handleLogout={handleLogout}
+          navItems={customNavItems}
+          handleLogout={() => handleNavigate(handleLogout)}
         />
       )}
 
@@ -1092,15 +1202,14 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
                     <button
                       type="button"
                       onClick={() => {
-                        if (user.role === 'HR') {
-                          navigate("/hr");
-                        } else if (user.role === 'REPORTING_MANAGER') {
-                          navigate("/reporting-dashboard");
-                        } else {
-                          navigate("/employee");
-                        }
+                        const target = user.role === 'HR'
+                          ? "/hr"
+                          : user.role === 'REPORTING_MANAGER'
+                            ? "/reporting-dashboard"
+                            : "/employee";
+                        handleNavigate(target);
                       }}
-                      className="px-4 py-2 bg-white text-brand-blue/70 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 transition-all"
+                      className="px-4 py-2 bg-white text-brand-blue/70 text-sm font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 transition-all cursor-pointer"
                     >
                       Back
                     </button>
@@ -1232,6 +1341,19 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
                                         className={`flex-1 bg-[#F8F7F4] border-none rounded-xl px-4 py-3 text-sm font-bold text-brand-blue focus:ring-2 focus:ring-brand-yellow/50 transition-all ${fieldErrors[field.name] && touched[field.name] ? 'ring-2 ring-red-500 bg-red-50' : ''} ${isDisabled ? 'cursor-not-allowed opacity-80' : ''}`}
                                       />
                                     </div>
+                                    {fieldErrors[field.name] && touched[field.name] && <FormFieldError error={fieldErrors[field.name]} show={true} />}
+                                  </div>
+                                ) : field.type === 'date' ? (
+                                  <div>
+                                    <DateInput
+                                      name={field.name}
+                                      value={form[field.name] || ''}
+                                      onChange={handleChange}
+                                      onBlur={handleBlur}
+                                      disabled={isDisabled}
+                                      maxYear={field.name === 'dob' ? CURRENT_YEAR : CURRENT_YEAR + 1}
+                                      className={`w-full bg-[#F8F7F4] border-none rounded-xl px-4 py-3 text-sm font-bold text-brand-blue focus:ring-2 focus:ring-brand-yellow/50 transition-all ${fieldErrors[field.name] && touched[field.name] ? 'ring-2 ring-red-500 bg-red-50' : ''} ${isDisabled ? 'cursor-not-allowed opacity-80' : ''}`}
+                                    />
                                     {fieldErrors[field.name] && touched[field.name] && <FormFieldError error={fieldErrors[field.name]} show={true} />}
                                   </div>
                                 ) : (
@@ -1441,11 +1563,11 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
                                 </div>
                                 <div className="space-y-1">
                                   <label className="text-[10px] font-bold text-brand-blue/30 uppercase tracking-widest">Start Date</label>
-                                  <input type="month" value={exp.startDate || ''} onChange={(e) => handleEmploymentChange(idx, 'startDate', e.target.value)} disabled={!editing} className="w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue" />
+                                  <DateInput mode="month" value={exp.startDate || ''} onChange={(e) => handleEmploymentChange(idx, 'startDate', e.target.value)} disabled={!editing} maxYear={CURRENT_YEAR} className="w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue" />
                                 </div>
                                 <div className="space-y-1">
                                   <label className="text-[10px] font-bold text-brand-blue/30 uppercase tracking-widest">End Date</label>
-                                  <input type="month" value={exp.endDate || ''} onChange={(e) => handleEmploymentChange(idx, 'endDate', e.target.value)} disabled={!editing} className={`w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue ${fieldErrors[`exp_endDate_${idx}`] ? 'ring-2 ring-red-500 bg-red-50' : ''}`} />
+                                  <DateInput mode="month" value={exp.endDate || ''} onChange={(e) => handleEmploymentChange(idx, 'endDate', e.target.value)} disabled={!editing} maxYear={CURRENT_YEAR} className={`w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue ${fieldErrors[`exp_endDate_${idx}`] ? 'ring-2 ring-red-500 bg-red-50' : ''}`} />
                                   {fieldErrors[`exp_endDate_${idx}`] && <p className="text-red-500 text-[10px] font-bold mt-1">{fieldErrors[`exp_endDate_${idx}`]}</p>}
                                 </div>
                               </div>
@@ -1641,6 +1763,13 @@ export default function EmployeeOwnProfile({ hideSidebar = false }) {
           </div>
         </div>
       </main>
+      <UnsavedChangesModal
+        isOpen={showUnsavedModal}
+        onClose={handleModalCancel}
+        onSave={handleModalSave}
+        onDiscard={handleModalDiscard}
+        isSaving={isSavingInModal}
+      />
     </div>
   );
 }

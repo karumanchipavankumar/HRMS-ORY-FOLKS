@@ -4,6 +4,7 @@ import api from '../../utils/api';
 import { toast } from 'react-toastify';
 import { Eye } from 'lucide-react';
 import LeaveDetailsModal from '../../components/LeaveDetailsModal';
+import DateInput from '../../components/DateInput';
 
 const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) => {
   const [formData, setFormData] = useState({
@@ -414,7 +415,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
 
           <div className="relative w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] border border-brand-blue/10 animate-in fade-in zoom-in duration-300">
             {/* Modal Header */}
-            <div className="bg-brand-blue px-6 py-6 flex justify-between items-center rounded-t-[2rem]">
+            <div className="bg-brand-blue px-6 py-6 flex justify-between items-center rounded-t-[2rem] flex-shrink-0">
               <div>
                 <h3 className="text-xl font-black text-white uppercase tracking-wider">New Leave Request</h3>
                 <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest mt-1">Submit your leave application</p>
@@ -430,7 +431,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-10 min-h-0">
+            <div className="flex-1 overflow-y-auto p-6 md:p-10 min-h-0 custom-scrollbar">
               <form id="leaveForm" onSubmit={handleRequest} className="space-y-6">
                 {/* Balance Info */}
                 <div className="mb-8">
@@ -493,8 +494,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                   {/* Start Date */}
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-brand-blue/40 uppercase tracking-widest block ml-1">Start Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       name="startDate"
                       value={formData.startDate}
                       onChange={handleInputChange}
@@ -515,8 +515,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                   {/* End Date */}
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-brand-blue/40 uppercase tracking-widest block ml-1">End Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       name="endDate"
                       value={formData.endDate}
                       onChange={handleInputChange}
@@ -537,22 +536,23 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
 
                 {/* Daily Breakdown Section */}
                 {formData.startDate && formData.endDate && Object.keys(formData.sessionData).length > 0 && (
-                  <div className="bg-bg-slate/30 border border-brand-blue/5 rounded-2xl overflow-hidden shadow-inner">
-                    <div className="bg-white/50 px-4 py-2 border-b border-brand-blue/5">
-                      <h4 className="text-[10px] font-black text-brand-blue/60 uppercase tracking-widest">Daily Breakdown</h4>
+                  <div className="bg-bg-slate/30 border border-brand-blue/10 rounded-2xl overflow-hidden shadow-inner flex flex-col">
+                    <div className="bg-white/80 px-4 py-2.5 border-b border-brand-blue/10 flex items-center justify-between flex-shrink-0">
+                      <h4 className="text-[10px] font-black text-brand-blue/70 uppercase tracking-widest">Daily Breakdown</h4>
+                      <span className="text-[9px] font-bold text-brand-blue/50 uppercase tracking-wider">{Object.keys(formData.sessionData).length} Days Listed</span>
                     </div>
-                    <div className="divide-y divide-brand-blue/5 max-h-[250px] overflow-y-auto custom-scrollbar">
+                    <div className="divide-y divide-brand-blue/5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1.5">
                       {Object.keys(formData.sessionData).map((date) => {
                         const dateObj = new Date(date);
                         const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
                         const currentSession = formData.sessionData[date];
 
                         return (
-                          <div key={date} className="p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between group hover:bg-white/40 transition-colors gap-3">
-                            <span className="text-[11px] font-bold text-brand-blue/70">{formattedDate}:</span>
+                          <div key={date} className="p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between group hover:bg-white/60 transition-colors gap-3">
+                            <span className="text-[11px] font-bold text-brand-blue/80">{formattedDate}:</span>
                             <div className="flex items-center gap-1.5 w-full sm:w-auto justify-start sm:justify-end overflow-x-auto pb-1 sm:pb-0">
                               {/* Full Day */}
-                              <label className={`flex items-center gap-1 cursor-pointer px-2 py-1 rounded-md transition-all ${currentSession === 'FULL' ? 'bg-brand-blue text-white' : 'hover:bg-brand-blue/5 text-brand-blue/40'}`}>
+                              <label className={`flex items-center gap-1 cursor-pointer px-2.5 py-1 rounded-md transition-all ${currentSession === 'FULL' ? 'bg-brand-blue text-white shadow-sm' : 'hover:bg-brand-blue/10 text-brand-blue/60'}`}>
                                 <input
                                   type="radio"
                                   name={`session-${date}`}
@@ -565,7 +565,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                               </label>
 
                               {/* Morning */}
-                              <label className={`flex items-center gap-1 cursor-pointer px-2 py-1 rounded-md transition-all ${currentSession === 'MORNING' ? 'bg-amber-500 text-white' : 'hover:bg-amber-500/5 text-brand-blue/40'}`}>
+                              <label className={`flex items-center gap-1 cursor-pointer px-2.5 py-1 rounded-md transition-all ${currentSession === 'MORNING' ? 'bg-amber-500 text-white shadow-sm' : 'hover:bg-amber-500/10 text-brand-blue/60'}`}>
                                 <input
                                   type="radio"
                                   name={`session-${date}`}
@@ -578,7 +578,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                               </label>
 
                               {/* Afternoon */}
-                              <label className={`flex items-center gap-1 cursor-pointer px-2 py-1 rounded-md transition-all ${currentSession === 'AFTERNOON' ? 'bg-indigo-500 text-white' : 'hover:bg-indigo-500/5 text-brand-blue/40'}`}>
+                              <label className={`flex items-center gap-1 cursor-pointer px-2.5 py-1 rounded-md transition-all ${currentSession === 'AFTERNOON' ? 'bg-indigo-500 text-white shadow-sm' : 'hover:bg-indigo-500/10 text-brand-blue/60'}`}>
                                 <input
                                   type="radio"
                                   name={`session-${date}`}
@@ -594,7 +594,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                         );
                       })}
                     </div>
-                    <div className="bg-brand-blue/5 p-3 flex justify-between items-center border-t border-brand-blue/5">
+                    <div className="bg-brand-blue/5 p-3 flex justify-between items-center border-t border-brand-blue/10 flex-shrink-0">
                       <span className="text-[10px] font-black text-brand-blue uppercase tracking-wider">Total Duration</span>
                       <span className="text-xs font-black text-brand-blue">{formData.daysCount} Days</span>
                     </div>
@@ -625,7 +625,7 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
             </div>
 
             {/* Modal Footer */}
-            <div className="bg-white p-6 md:px-10 border-t border-brand-blue/5 rounded-b-[2rem]">
+            <div className="bg-white p-6 md:px-10 border-t border-brand-blue/5 rounded-b-[2rem] flex-shrink-0">
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"

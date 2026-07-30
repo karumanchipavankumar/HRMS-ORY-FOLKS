@@ -198,7 +198,7 @@ export default function EmployeeSelectorModal({ open, onClose, onSave }) {
           />
         </div>
 
-        <div className="max-h-64 overflow-y-auto mb-4">
+        <div className="max-h-64 overflow-y-auto custom-scrollbar mb-4">
           {filteredTeam.length === 0 && (<p className="text-sm text-gray-500">No available team members found</p>)}
           {filteredTeam.map((emp) => {
             const empDisabled = isDisabled(emp);

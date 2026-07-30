@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../utils/api";
 import { validateJoiningDate } from "../utils/formValidation";
+import DateInput, { CURRENT_YEAR } from "./DateInput";
 
 export default function CompanyDetailsModal({ open, onClose, onSave }) {
     const [employees, setEmployees] = useState([]);
@@ -232,9 +233,9 @@ export default function CompanyDetailsModal({ open, onClose, onSave }) {
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-bold text-brand-blue/40 uppercase tracking-widest ml-1">Joining Date</label>
-                                            <input
-                                                type="date"
+                                            <DateInput
                                                 value={formData.joiningDate}
+                                                maxYear={CURRENT_YEAR + 1}
                                                 onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
                                                 className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm font-bold text-brand-blue focus:ring-2 focus:ring-brand-yellow/50 transition-all outline-none"
                                             />

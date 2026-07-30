@@ -11,6 +11,7 @@ import {
     validateJoiningDate
 } from "../utils/formValidation";
 import { FormFieldError } from "./FormValidation";
+import DateInput, { CURRENT_YEAR } from "./DateInput";
 
 // Allowed roles — Admin and Reporting Manager are excluded
 const ALLOWED_ROLES = [
@@ -350,7 +351,7 @@ export default function AddEmployeeModal({ open, onClose, onEmployeeCreated }) {
                 </div>
 
                 {/* ── Content ── */}
-                <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 bg-gray-50">
                     {error && (
                         <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-lg flex items-center gap-3">
                             <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
@@ -481,9 +482,9 @@ export default function AddEmployeeModal({ open, onClose, onEmployeeCreated }) {
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 mb-2">Date of Birth *</label>
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             value={formData.dateOfBirth}
+                                            maxYear={CURRENT_YEAR}
                                             onChange={(e) => {
                                                 setFormData({ ...formData, dateOfBirth: e.target.value });
                                                 // Real-time validation
@@ -620,9 +621,9 @@ export default function AddEmployeeModal({ open, onClose, onEmployeeCreated }) {
                                     {/* Joining Date */}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 mb-2">Joining Date *</label>
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             value={formData.joiningDate}
+                                            maxYear={CURRENT_YEAR + 1}
                                             onChange={(e) => {
                                                 setFormData({ ...formData, joiningDate: e.target.value });
                                                 const validation = validateJoiningDate(e.target.value);

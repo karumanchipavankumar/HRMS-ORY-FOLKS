@@ -7,6 +7,7 @@ import { getHrNavItems } from "../../utils/hrNav";
 import { getRmNavItems } from "../../utils/rmNav";
 import api from "../../utils/api";
 import NotificationComponent from "../../components/NotificationComponent";
+import DateInput, { CURRENT_YEAR } from "../../components/DateInput";
 import {
     validateName,
     validateEmail,
@@ -28,6 +29,8 @@ import {
 } from "../../utils/formValidation";
 import { FormFieldError, FileUploadValidationInfo, CharacterCounter } from "../../components/FormValidation";
 import "../../styles/formValidation.css";
+import { toast } from "react-toastify";
+import UnsavedChangesModal from "../../components/UnsavedChangesModal";
 
 
 
@@ -54,12 +57,98 @@ export default function EmployeeProfile() {
   const [activeSection, setActiveSection] = useState("personal");
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
+  const [initialForm, setInitialForm] = useState(null);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
+  const [isSavingInModal, setIsSavingInModal] = useState(false);
   const [leaveBalance, setLeaveBalance] = useState(null);
   const [fetchingBalance, setFetchingBalance] = useState(false);
   const [user, setUser] = useState({});
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [touched, setTouched] = useState({});
+
+  const isDirty = React.useMemo(() => {
+    if (!editing || !initialForm) return false;
+    return JSON.stringify(form) !== JSON.stringify(initialForm);
+  }, [editing, form, initialForm]);
+
+  const handleNavigate = React.useCallback((target) => {
+    if (isDirty) {
+      setPendingNavigation(() => () => {
+        if (typeof target === "function") {
+          target();
+        } else if (typeof target === "string") {
+          navigate(target);
+        } else {
+          navigate(-1);
+        }
+      });
+      setShowUnsavedModal(true);
+    } else {
+      if (typeof target === "function") {
+        target();
+      } else if (typeof target === "string") {
+        navigate(target);
+      } else {
+        navigate(-1);
+      }
+    }
+  }, [isDirty, navigate]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved changes. If you leave now, your changes will be lost.";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isDirty) {
+        window.history.pushState(null, "", window.location.href);
+        setPendingNavigation(() => () => navigate(-1));
+        setShowUnsavedModal(true);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isDirty, navigate]);
+
+  const handleModalSave = async () => {
+    setIsSavingInModal(true);
+    const success = await handleSaveProfile();
+    setIsSavingInModal(false);
+    if (success) {
+      setShowUnsavedModal(false);
+      if (pendingNavigation) {
+        const navFn = pendingNavigation;
+        setPendingNavigation(null);
+        navFn();
+      }
+    }
+  };
+
+  const handleModalDiscard = () => {
+    // Reset dirty state so guards don't fire during navigation
+    setInitialForm(JSON.parse(JSON.stringify(form)));
+    setShowUnsavedModal(false);
+    if (pendingNavigation) {
+      const navFn = pendingNavigation;
+      setPendingNavigation(null);
+      navFn();
+    }
+  };
+
+  const handleModalCancel = () => {
+    setShowUnsavedModal(false);
+    setPendingNavigation(null);
+  };
 
 
   const sections = [
@@ -170,7 +259,7 @@ export default function EmployeeProfile() {
         setEmployee(data);
 
         // Populate form
-        setForm({
+        const populatedForm = {
           role: data.designation || "Candidate",
           companyMail: data.corporateEmail || "",
           personalEmail: data.email || "",
@@ -204,7 +293,10 @@ export default function EmployeeProfile() {
           lastName: data.lastName || "",
           photoUrl: data.photoPath || "",
           joiningDate: data.joiningDate || "",
-        });
+        };
+
+        setForm(populatedForm);
+        setInitialForm(JSON.parse(JSON.stringify(populatedForm)));
 
         // Populate documents
         if (data.documentList) {
@@ -583,74 +675,87 @@ export default function EmployeeProfile() {
     }
   };
 
+  const handleSaveProfile = async () => {
+    if (form.joiningDate) {
+      const jdVal = validateJoiningDate(form.joiningDate);
+      if (!jdVal.isValid) {
+        toast.error(jdVal.error);
+        return false;
+      }
+    }
+
+    setLoading(true);
+    try {
+      const payload = {
+        email: form.personalEmail || employee?.email || "",
+        firstName: form.firstName || employee?.firstName || "",
+        middleName: form.middleName || employee?.middleName || "",
+        lastName: form.lastName || employee?.lastName || "",
+        phoneNumber: (form.mobile || ""),
+        alternatePhone: (form.alternateMobile || ""),
+        dateOfBirth: form.dob || null,
+        gender: form.gender || null,
+        maritalStatus: form.maritalStatus || null,
+        bloodGroup: form.bloodGroup || null,
+        presentAddress: form.currentAddress || null,
+        permanentAddress: form.permanentAddress || null,
+        addressProof: form.aadhar ? 'Aadhar' : form.pan ? 'PAN' : (employee?.addressProof || null),
+        addressProofNumber: form.aadhar ? form.aadhar : form.pan ? form.pan : (employee?.addressProofNumber || null),
+        // PAN and Aadhaar now persist in their own columns so both save independently.
+        panNo: form.pan || null,
+        aadhaarNo: form.aadhar || null,
+        passportNo: form.passport || null,
+        emergencyContactName: form.emergencyContactName || null,
+        emergencyRelationship: form.emergencyRelationship || null,
+        emergencyPhone: (form.emergencyPhoneCountryCode || "+91") + (form.emergencyPhone || ""),
+        emergencyAddress: form.emergencyAddress || null,
+        educationList: Array.isArray(form.education) ? form.education : [],
+        experienceList: Array.isArray(form.employmentHistory)
+          ? form.employmentHistory.map(exp => ({
+            ...exp,
+            startDate: convertMonthToDate(exp.startDate),
+            endDate: convertMonthToDate(exp.endDate)
+          }))
+          : [],
+        photoPath: form.photoUrl || employee?.photoPath || null,
+        designation: form.role || null,
+        corporateEmail: form.companyMail || null,
+        oryfolksId: form.companyId || null,
+        joiningDate: form.joiningDate || null,
+      };
+
+      const res = await api(`/api/employees/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.message || "Failed to save");
+      }
+
+      const json = await res.json();
+      const updated = json.data || json || payload;
+      setEmployee((p) => ({ ...p, ...updated }));
+      setEditing(false);
+
+      // Update initialForm snapshot so dirty state resets
+      setInitialForm(JSON.parse(JSON.stringify(form)));
+
+      toast.success("Your details have been saved successfully.");
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || "Failed to update profile. Please try again.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEditToggle = async () => {
     if (editing) {
-      try {
-        if (form.joiningDate) {
-          const jdVal = validateJoiningDate(form.joiningDate);
-          if (!jdVal.isValid) {
-            alert(jdVal.error);
-            return;
-          }
-        }
-        setLoading(true);
-        const payload = {
-          email: form.personalEmail || employee?.email || "",
-          firstName: form.firstName || employee?.firstName || "",
-          middleName: form.middleName || employee?.middleName || "",
-          lastName: form.lastName || employee?.lastName || "",
-          phoneNumber: (form.mobile || ""),
-          alternatePhone: (form.alternateMobile || ""),
-          dateOfBirth: form.dob || null,
-          gender: form.gender || null,
-          maritalStatus: form.maritalStatus || null,
-          bloodGroup: form.bloodGroup || null,
-          presentAddress: form.currentAddress || null,
-          permanentAddress: form.permanentAddress || null,
-          addressProof: form.aadhar ? 'Aadhar' : form.pan ? 'PAN' : (employee?.addressProof || null),
-          addressProofNumber: form.aadhar ? form.aadhar : form.pan ? form.pan : (employee?.addressProofNumber || null),
-          // PAN and Aadhaar now persist in their own columns so both save independently.
-          panNo: form.pan || null,
-          aadhaarNo: form.aadhar || null,
-          passportNo: form.passport || null,
-          emergencyContactName: form.emergencyContactName || null,
-          emergencyRelationship: form.emergencyRelationship || null,
-          emergencyPhone: (form.emergencyPhoneCountryCode || "+91") + (form.emergencyPhone || ""),
-          emergencyAddress: form.emergencyAddress || null,
-          educationList: Array.isArray(form.education) ? form.education : [],
-          experienceList: Array.isArray(form.employmentHistory)
-            ? form.employmentHistory.map(exp => ({
-              ...exp,
-              startDate: convertMonthToDate(exp.startDate),
-              endDate: convertMonthToDate(exp.endDate)
-            }))
-            : [],
-          photoPath: form.photoUrl || employee?.photoPath || null,
-          designation: form.role || null,
-          corporateEmail: form.companyMail || null,
-          oryfolksId: form.companyId || null,
-          joiningDate: form.joiningDate || null,
-        };
-
-        const res = await api(`/api/employees/${id}`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          throw new Error(json.message || "Failed to save");
-        }
-
-        const json = await res.json();
-        const updated = json.data || json || payload;
-        setEmployee((p) => ({ ...p, ...updated }));
-        setEditing(false);
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        setLoading(false);
-      }
+      await handleSaveProfile();
     } else {
       setEditing(true);
     }
@@ -692,22 +797,29 @@ export default function EmployeeProfile() {
         <Sidebar
           activeTab="candidates"
           setActiveTab={() => { }}
-          handleLogout={handleLogout}
-          navItems={getHrNavItems()}
+          handleLogout={() => handleNavigate(handleLogout)}
+          navItems={getHrNavItems().map(item => item.to ? { ...item, onClick: () => handleNavigate(item.to) } : item)}
           hideLogout={true}
         />
       ) : userRole === "REPORTING_MANAGER" ? (
         <Sidebar
           activeTab="team"
           setActiveTab={() => { }}
-          handleLogout={handleLogout}
-          navItems={getRmNavItems()}
+          handleLogout={() => handleNavigate(handleLogout)}
+          navItems={getRmNavItems().map(item => item.to ? { ...item, onClick: () => handleNavigate(item.to) } : item)}
           hideLogout={true}
         />
       ) : (
         <AdminSidebar
           activeTab="candidates"
-          onLogout={handleLogout}
+          onLogout={() => handleNavigate(handleLogout)}
+          setActiveTab={(tab) => {
+            let target = "/admin";
+            if (tab === "candidates" || tab === "team") target = "/admin/candidates";
+            else if (tab === "reporting-managers") target = "/admin/reporting-managers";
+            else if (tab === "timesheets") target = "/admin/timesheets";
+            handleNavigate(target);
+          }}
         />
       )}
 
@@ -811,8 +923,8 @@ export default function EmployeeProfile() {
                 )}
 
                 <button
-                  onClick={() => navigate(userRole === "ADMIN" ? "/admin" : userRole === "HR" ? "/hr" : "/reporting-dashboard")}
-                  className="p-2.5 bg-brand-blue/5 hover:bg-brand-blue text-brand-blue hover:text-white rounded-xl border border-brand-blue/10 transition-all duration-200 shadow-sm active:scale-95 group"
+                  onClick={() => handleNavigate(userRole === "ADMIN" ? "/admin" : userRole === "HR" ? "/hr" : "/reporting-dashboard")}
+                  className="p-2.5 bg-brand-blue/5 hover:bg-brand-blue text-brand-blue hover:text-white rounded-xl border border-brand-blue/10 transition-all duration-200 shadow-sm active:scale-95 group cursor-pointer"
                   title="Go to Dashboard"
                 >
                   <svg className="w-4.5 h-4.5 transition-transform duration-200 group-hover:scale-110" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -821,10 +933,10 @@ export default function EmployeeProfile() {
                 </button>
 
                 <button
-                  onClick={() => navigate(-1)}
-                  className="px-4 py-2 bg-white text-brand-blue font-bold rounded-xl border border-brand-blue/10 hover:bg-gray-50 transition-all flex items-center gap-2"
+                  onClick={() => handleNavigate(-1)}
+                  className="px-4 py-2 bg-white text-brand-blue font-bold rounded-xl border border-brand-blue/10 hover:bg-gray-50 transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="19" y1="12" x2="5" y2="12"></line>
                     <polyline points="12 19 5 12 12 5"></polyline>
                   </svg>
@@ -1025,6 +1137,19 @@ export default function EmployeeProfile() {
                                       className={`flex-1 bg-[#F8F7F4] border-none rounded-xl px-4 py-3 text-sm font-bold text-brand-blue focus:ring-2 focus:ring-brand-yellow/50 transition-all ${fieldErrors[field.name] && touched[field.name] ? 'ring-2 ring-red-500 bg-red-50' : ''} ${isDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                                     />
                                   </div>
+                                  {fieldErrors[field.name] && touched[field.name] && <FormFieldError error={fieldErrors[field.name]} show={true} />}
+                                </div>
+                              ) : field.type === 'date' ? (
+                                <div>
+                                  <DateInput
+                                    name={field.name}
+                                    value={form[field.name] || ''}
+                                    onChange={handleChange}
+                                    onBlur={handleBlur}
+                                    disabled={isDisabled}
+                                    maxYear={field.name === 'dob' ? CURRENT_YEAR : CURRENT_YEAR + 1}
+                                    className={`w-full bg-[#F8F7F4] border-none rounded-xl px-4 py-3 text-sm font-bold text-brand-blue focus:ring-2 focus:ring-brand-yellow/50 transition-all ${fieldErrors[field.name] && touched[field.name] ? 'ring-2 ring-red-500 bg-red-50' : ''} ${isDisabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                  />
                                   {fieldErrors[field.name] && touched[field.name] && <FormFieldError error={fieldErrors[field.name]} show={true} />}
                                 </div>
                               ) : (
@@ -1228,11 +1353,11 @@ export default function EmployeeProfile() {
                               </div>
                               <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-brand-blue/30 uppercase tracking-widest">Start Date</label>
-                                <input type="month" value={exp.startDate || ''} onChange={(e) => handleEmploymentChange(idx, 'startDate', e.target.value)} disabled={!editing} className="w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue" />
+                                <DateInput mode="month" value={exp.startDate || ''} onChange={(e) => handleEmploymentChange(idx, 'startDate', e.target.value)} disabled={!editing} maxYear={CURRENT_YEAR} className="w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue" />
                               </div>
                               <div className="space-y-1">
                                 <label className="text-[10px] font-bold text-brand-blue/30 uppercase tracking-widest">End Date</label>
-                                <input type="month" value={exp.endDate || ''} onChange={(e) => handleEmploymentChange(idx, 'endDate', e.target.value)} disabled={!editing} className="w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue" />
+                                <DateInput mode="month" value={exp.endDate || ''} onChange={(e) => handleEmploymentChange(idx, 'endDate', e.target.value)} disabled={!editing} maxYear={CURRENT_YEAR} className="w-full bg-white border-none rounded-lg px-3 py-2 text-sm font-bold text-brand-blue" />
                               </div>
                               <div className="md:col-span-2 space-y-1">
                                 <label className="text-[10px] font-bold text-brand-blue/30 uppercase tracking-widest">Employer Address</label>
@@ -1452,6 +1577,13 @@ export default function EmployeeProfile() {
           </div>
         </div>
       </main>
+      <UnsavedChangesModal
+        isOpen={showUnsavedModal}
+        onClose={handleModalCancel}
+        onSave={handleModalSave}
+        onDiscard={handleModalDiscard}
+        isSaving={isSavingInModal}
+      />
     </div>
   );
 }
