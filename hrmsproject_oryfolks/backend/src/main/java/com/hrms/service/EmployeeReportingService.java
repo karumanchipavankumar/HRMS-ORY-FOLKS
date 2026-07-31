@@ -397,12 +397,12 @@ public class EmployeeReportingService {
 
         if (role == Role.REPORTING_MANAGER) {
             if (firstActiveHR != null) {
-                if (er.getReportingManager() == null || !er.getReportingManager().getId().equals(firstActiveHR.getId())) {
-                    er.setReportingManager(firstActiveHR);
+                if (er.getHr() == null) {
+                    er.setHr(firstActiveHR);
                     updated = true;
                 }
-                if (er.getHr() == null || !er.getHr().getId().equals(firstActiveHR.getId())) {
-                    er.setHr(firstActiveHR);
+                if (er.getReportingManager() == null || !er.getReportingManager().getId().equals(er.getHr().getId())) {
+                    er.setReportingManager(er.getHr());
                     updated = true;
                 }
             }
@@ -419,7 +419,7 @@ public class EmployeeReportingService {
             }
         } else if (role == Role.EMPLOYEE) {
             if (firstActiveHR != null) {
-                if (er.getHr() == null || !er.getHr().getId().equals(firstActiveHR.getId())) {
+                if (er.getHr() == null) {
                     er.setHr(firstActiveHR);
                     updated = true;
                 }

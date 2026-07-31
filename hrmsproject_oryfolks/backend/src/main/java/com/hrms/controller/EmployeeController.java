@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import com.hrms.model.Employee;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/employees")
@@ -32,6 +35,9 @@ public class EmployeeController {
 
     @Autowired
     private com.hrms.repository.CompanyDetailRepository companyDetailRepository;
+
+    @Autowired
+    private com.hrms.repository.EmployeeReportingRepository employeeReportingRepository;
 
     /* =========================
        GENERATE EMPLOYEE ID & EMAIL
@@ -257,6 +263,20 @@ public class EmployeeController {
 
         // Block disabling an account with pending timesheets/leaves. Enabling is never blocked.
         if (Boolean.FALSE.equals(active)) {
+            Employee employee = employeeRepository.findById(id)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+            if (employee.getUser() != null && employee.getUser().getRole() == com.hrms.model.Role.HR) {
+                List<com.hrms.model.EmployeeReporting> assigned = employeeReportingRepository.findByHr(employee);
+                if (assigned != null && !assigned.isEmpty()) {
+                    List<String> names = assigned.stream()
+                            .map(er -> er.getEmployee().getFirstName() + " " + er.getEmployee().getLastName())
+                            .collect(Collectors.toList());
+                    String msg = "Cannot disable this HR account. The following employees/reporting managers are assigned to this HR Liaison: " + String.join(", ", names) + ". Please reassign these employees to another active HR Liaison first.";
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                            .body(ApiResponse.error(msg));
+                }
+            }
+
             ResponseEntity<ApiResponse<?>> blocked = pendingApprovalBlock(id, "disable");
             if (blocked != null) {
                 return blocked;
@@ -281,6 +301,20 @@ public class EmployeeController {
     public ResponseEntity<ApiResponse<?>> deleteEmployee(
             @PathVariable Long id
     ) {
+        Employee employee = employeeRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
+        if (employee.getUser() != null && employee.getUser().getRole() == com.hrms.model.Role.HR) {
+            List<com.hrms.model.EmployeeReporting> assigned = employeeReportingRepository.findByHr(employee);
+            if (assigned != null && !assigned.isEmpty()) {
+                List<String> names = assigned.stream()
+                        .map(er -> er.getEmployee().getFirstName() + " " + er.getEmployee().getLastName())
+                        .collect(Collectors.toList());
+                String msg = "Cannot delete this HR account. The following employees/reporting managers are assigned to this HR Liaison: " + String.join(", ", names) + ". Please reassign these employees to another active HR Liaison first.";
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(ApiResponse.error(msg));
+            }
+        }
+
         // Block deleting an account with pending timesheets/leaves awaiting approval.
         ResponseEntity<ApiResponse<?>> blocked = pendingApprovalBlock(id, "delete");
         if (blocked != null) {

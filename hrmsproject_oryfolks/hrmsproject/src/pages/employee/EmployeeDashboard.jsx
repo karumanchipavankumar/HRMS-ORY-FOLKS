@@ -228,8 +228,13 @@ const EmployeeDashboard = () => {
 			week.entries.push(entry);
 			week.totalHours += entry.totalHours || 0;
 
-			if (entry.status === 'PENDING') week.status = 'PENDING';
-			else if (entry.status === 'REJECTED' && week.status !== 'PENDING') week.status = 'REJECTED';
+			if (entry.status === 'PENDING') {
+				week.status = entry.reapplyUsed ? 'REAPPROVAL_PENDING' : 'PENDING';
+			} else if (entry.status === 'REAPPLY_REQUESTED' && week.status !== 'PENDING' && week.status !== 'REAPPROVAL_PENDING') {
+				week.status = 'REAPPLY_REQUESTED';
+			} else if (entry.status === 'REJECTED' && week.status !== 'PENDING' && week.status !== 'REAPPROVAL_PENDING') {
+				week.status = 'REJECTED';
+			}
 		});
 
 		return Object.values(weeksMap).sort((a, b) => b.start - a.start);
@@ -694,7 +699,7 @@ const EmployeeDashboard = () => {
 														</td>
 														<td className="p-4 px-6">
 															<span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${week.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-600' : week.status === 'REJECTED' ? 'bg-red-100 text-red-600' : 'bg-brand-yellow/10 text-brand-yellow'}`}>
-																{week.status}
+																{week.status.replace('_', ' ')}
 															</span>
 														</td>
 														<td className="p-4 px-6 text-center text-brand-blue/60">{getWorkedDays(week.entries)} Days</td>

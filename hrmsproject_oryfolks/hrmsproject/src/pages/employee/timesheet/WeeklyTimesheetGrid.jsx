@@ -1,9 +1,55 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
+import api from "../../../utils/api";
 
 const EMPTY_ARRAY = [];
 
-const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId, approvedLeaves = EMPTY_ARRAY, pendingLeaves = EMPTY_ARRAY, holidays = EMPTY_ARRAY, readOnly = false, onApprove, onReject, disabledAccount = false }) => {
+const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId, approvedLeaves = EMPTY_ARRAY, pendingLeaves = EMPTY_ARRAY, holidays = EMPTY_ARRAY, readOnly: propReadOnly = false, onApprove, onReject, disabledAccount = false }) => {
+    const [isEditingPending, setIsEditingPending] = useState(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [validationErrors, setValidationErrors] = useState({ projectIds: {}, projectNames: {}, invalidDates: {} });
+    const [joiningDate, setJoiningDate] = useState(null);
+
+    const user = JSON.parse(localStorage.getItem("user")) || {};
+    const isAdmin = user.role === 'ADMIN';
+    const isReapplyUsed = weekData.entries && weekData.entries.some(entry => entry.reapplyUsed === true);
+
+    const readOnly = propReadOnly && !(weekData.status === 'Pending' && isEditingPending);
+
+    useEffect(() => {
+        setIsEditingPending(false);
+        setIsDirty(false);
+    }, [weekData, employeeId]);
+
+    useEffect(() => {
+        const fetchCompanyDetails = async () => {
+            if (!employeeId) return;
+            try {
+                const response = await api(`/api/company-details/employee/${employeeId}`);
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.data && result.data.joiningDate) {
+                        setJoiningDate(result.data.joiningDate);
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching company details:", err);
+            }
+        };
+        fetchCompanyDetails();
+    }, [employeeId]);
+
+    const handleBackClick = () => {
+        if (isProcessing) return;
+        if (isDirty) {
+            if (!window.confirm("Do you want to discard your changes and go back?")) {
+                return;
+            }
+        }
+        onBack();
+    };
+
     // Dates for the week (7 days)
     const [dates, setDates] = useState([]);
 
@@ -171,14 +217,30 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
     }, [weekData, approvedLeaves, holidays]);
 
     const handleAddRow = () => {
+        setIsDirty(true);
         setProjectRows([...projectRows, { id: Date.now() + Math.random(), projectId: '', projectName: '', taskId: '', taskDesc: '', onsite: 'Offshore', billable: 'Billable', location: 'India', hours: Array.from({ length: 7 }, () => ({ value: '', id: null })), comment: '' }]);
     };
 
     const handleRowChange = (rowIndex, field, value) => {
+        setIsDirty(true);
         const updated = projectRows.map((row, idx) =>
             idx === rowIndex ? { ...row, [field]: value } : row
         );
         setProjectRows(updated);
+
+        if (field === 'projectId') {
+            setValidationErrors(prev => {
+                const next = { ...prev.projectIds };
+                delete next[rowIndex];
+                return { ...prev, projectIds: next };
+            });
+        } else if (field === 'projectName') {
+            setValidationErrors(prev => {
+                const next = { ...prev.projectNames };
+                delete next[rowIndex];
+                return { ...prev, projectNames: next };
+            });
+        }
     };
 
     const getLocalDateStr = (date) => {
@@ -226,11 +288,48 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
         return cellDate > today;
     };
 
+    const isBeforeJoiningDate = (date) => {
+        if (!date || !joiningDate) return false;
+        const cellDate = date instanceof Date ? new Date(date) : parseDateLocal(date);
+        cellDate.setHours(0, 0, 0, 0);
+        
+        const joinDate = parseDateLocal(joiningDate);
+        joinDate.setHours(0, 0, 0, 0);
+        
+        return cellDate < joinDate;
+    };
+
     const isHolidayDay = (dayIdx) => {
         if (!dates[dayIdx]) return false;
         const ds = getLocalDateStr(dates[dayIdx]);
         return holidays.some(h => getLocalDateStr(h.holidayDate) === ds);
     };
+
+    const isCurrentWeekAndBeforeFriday = () => {
+        if (!weekData || !weekData.start) return false;
+        
+        const today = new Date();
+        
+        const getSaturdayDate = (d) => {
+            const date = parseDateLocal(d);
+            const day = date.getDay(); // 0 (Sun) to 6 (Sat)
+            const diff = (day + 1) % 7;
+            date.setDate(date.getDate() - diff);
+            date.setHours(0, 0, 0, 0);
+            return date;
+        };
+        
+        const todaySatStr = getLocalDateStr(getSaturdayDate(today));
+        const weekSatStr = getLocalDateStr(getSaturdayDate(weekData.start));
+        
+        if (todaySatStr === weekSatStr) {
+            // Friday is 5 (0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat)
+            return today.getDay() !== 5;
+        }
+        
+        return false;
+    };
+
 
 
 
@@ -247,6 +346,7 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
     };
 
     const handleHourChange = (rowIndex, dayIndex, value) => {
+        setIsDirty(true);
         // Validation removed to allow "two entries in single column" (e.g. 4h Leave + 4h Work)
         const clean = sanitizeHours(value);
         const updated = projectRows.map((row, rIdx) => {
@@ -257,21 +357,41 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
             return { ...row, hours: newHours };
         });
         setProjectRows(updated);
+
+        setValidationErrors(prev => {
+            const next = { ...prev.invalidDates };
+            delete next[dayIndex];
+            return { ...prev, invalidDates: next };
+        });
     };
 
     const handleLeaveHourChange = (typeKey, dayIndex, value) => {
+        setIsDirty(true);
         const clean = sanitizeHours(value);
         const updated = { ...leaveRows, [typeKey]: [...leaveRows[typeKey]] };
         updated[typeKey][dayIndex] = { ...updated[typeKey][dayIndex], value: clean };
         setLeaveRows(updated);
+
+        setValidationErrors(prev => {
+            const next = { ...prev.invalidDates };
+            delete next[dayIndex];
+            return { ...prev, invalidDates: next };
+        });
     };
 
     const handleSwipeChange = (dayIndex, value) => {
+        setIsDirty(true);
         const clean = sanitizeHours(value);
         setTruTimeRows((prev) => ({
             ...prev,
             swipe: prev.swipe.map((sh, idx) => (idx === dayIndex ? { ...sh, value: clean } : sh)),
         }));
+
+        setValidationErrors(prev => {
+            const next = { ...prev.invalidDates };
+            delete next[dayIndex];
+            return { ...prev, invalidDates: next };
+        });
     };
 
     // Block invalid keystrokes (letters/symbols/space) before they register.
@@ -344,21 +464,36 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
     // Project ID / Name are mandatory on any project row that has hours entered.
     // Shared by both Save (draft) and Submit so the backend never rejects the payload.
     const validateProjectRows = () => {
+        let isValid = true;
+        const newProjIds = {};
+        const newProjNames = {};
+
         for (let idx = 0; idx < projectRows.length; idx++) {
             const row = projectRows[idx];
             const rowTotal = calculateRowTotal(row.hours);
             if (rowTotal > 0) {
                 if (!row.projectId || !row.projectId.trim()) {
                     toast.error(`Project ID is required for project row ${idx + 1}.`);
-                    return false;
+                    newProjIds[idx] = true;
+                    isValid = false;
+                    break;
                 }
                 if (!row.projectName || !row.projectName.trim()) {
                     toast.error(`Project Name is required for project row ${idx + 1}.`);
-                    return false;
+                    newProjNames[idx] = true;
+                    isValid = false;
+                    break;
                 }
             }
         }
-        return true;
+
+        setValidationErrors(prev => ({
+            ...prev,
+            projectIds: newProjIds,
+            projectNames: newProjNames
+        }));
+
+        return isValid;
     };
 
     // Build the weekly payload from the current grid state. Future-dated cells are locked and
@@ -445,23 +580,72 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
         return payload;
     };
 
-    // Rule 2: Save the week as a DRAFT. Unlike Submit, a draft is allowed to be partial —
-    // we do NOT require each weekday to total 8 hours, only that project rows are identified.
-    const handleDraftSave = () => {
+    const handleDraftSave = async () => {
+        setValidationErrors({ projectIds: {}, projectNames: {}, invalidDates: {} });
         if (!validateProjectRows()) return;
-        onSaveDraft(buildPayload());
+
+        const newInvalidDates = {};
+        let dateValid = true;
+        for (let i = 0; i < 7; i++) {
+            if (isBeforeJoiningDate(dates[i])) {
+                let preJoiningTotal = 0;
+                projectRows.forEach(row => preJoiningTotal += (parseFloat(row.hours[i].value) || 0));
+                if (preJoiningTotal > 0) {
+                    toast.error(`Cannot log working hours before joining date: ${dates[i].toDateString()}`);
+                    newInvalidDates[i] = true;
+                    dateValid = false;
+                    break;
+                }
+            }
+        }
+        setValidationErrors(prev => ({
+            ...prev,
+            invalidDates: newInvalidDates
+        }));
+        if (!dateValid) return;
+
+        setIsDirty(false);
+        setIsProcessing(true);
+        try {
+            await onSaveDraft(buildPayload());
+            setValidationErrors({ projectIds: {}, projectNames: {}, invalidDates: {} });
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        // Clear all validation errors first
+        setValidationErrors({ projectIds: {}, projectNames: {}, invalidDates: {} });
+
         // Validate project rows
-        if (!validateProjectRows()) return;
+        if (!validateProjectRows()) {
+            return;
+        }
 
         // Validate daily hours
+        const newInvalidDates = {};
+        let dateValid = true;
         for (let i = 0; i < 7; i++) {
             if (isWeekend(dates[i])) continue;
             // Future days are locked (Rule 1) and can't be filled yet, so they are not required
             // to reach 8h at submit time — only today and past weekdays are validated.
             if (isFutureDate(dates[i])) continue;
+
+            if (isBeforeJoiningDate(dates[i])) {
+                let preJoiningTotal = 0;
+                projectRows.forEach(row => preJoiningTotal += (parseFloat(row.hours[i].value) || 0));
+                if (preJoiningTotal > 0) {
+                    toast.error(`Cannot log working hours before joining date: ${dates[i].toDateString()}`);
+                    newInvalidDates[i] = true;
+                    dateValid = false;
+                    break;
+                }
+                continue;
+            }
+
             let dailyTotal = 0;
             projectRows.forEach(row => dailyTotal += (parseFloat(row.hours[i].value) || 0));
             dailyTotal += (parseFloat(leaveRows.holiday[i].value) || 0);
@@ -472,14 +656,71 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
             const roundedTotal = parseFloat(dailyTotal.toFixed(2));
             if (roundedTotal === 0) {
                 toast.error(`Hours for ${dates[i].toDateString()} are not filled.`);
-                return;
+                newInvalidDates[i] = true;
+                dateValid = false;
+                break;
             } else if (roundedTotal !== 8.00) {
                 toast.error(`Total hours for ${dates[i].toDateString()} should be 8 hours (currently ${dailyTotal.toFixed(2)} hours).`);
-                return;
+                newInvalidDates[i] = true;
+                dateValid = false;
+                break;
             }
         }
 
-        onSave(buildPayload());
+        setValidationErrors(prev => ({
+            ...prev,
+            invalidDates: newInvalidDates
+        }));
+
+        if (!dateValid) return;
+
+        setIsDirty(false);
+        setIsProcessing(true);
+        try {
+            await onSave(buildPayload());
+            setValidationErrors({ projectIds: {}, projectNames: {}, invalidDates: {} });
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleRejectApprovedTimesheet = async () => {
+        const reason = window.prompt("Enter reason for requesting reapply on this approved timesheet:");
+        if (reason === null) return;
+
+        setIsProcessing(true);
+        try {
+            const firstEntry = weekData.entries && weekData.entries[0];
+            if (!firstEntry) {
+                toast.error("No entries found in this timesheet.");
+                return;
+            }
+
+            const response = await api(`/api/timesheets/${firstEntry.id}/reapply-request`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    reviewerId: user.id,
+                    reason: reason
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Failed to request reapply");
+            }
+
+            toast.success("Approved timesheet rejected and returned for reapply!");
+            if (onBack) {
+                onBack();
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error(err.message || "Error requesting reapply");
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const formatDateHeader = (date) => {
@@ -495,7 +736,7 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
         <div className="flex flex-col max-w-full mx-auto w-full flex-1 min-h-0">
             {/* Back navigation — standalone, ABOVE/OUTSIDE the timesheet card */}
             <button
-                onClick={onBack}
+                onClick={handleBackClick}
                 aria-label="Back"
                 className="self-start mb-3 inline-flex items-center gap-2 text-slate-600 hover:text-slate-900 font-bold text-sm transition-colors group"
             >
@@ -546,33 +787,83 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                             <>
                                 {/* Rule 2: Save the sheet as a draft without submitting for approval.
                                     Secondary/outline styling, placed to the LEFT of Submit Sheet. */}
-                                {onSaveDraft && (
+                                {onSaveDraft && !isEditingPending && (
                                     <button
                                         onClick={handleDraftSave}
-                                        className="flex-1 sm:flex-none px-4 md:px-5 py-2 rounded-lg text-[9px] md:text-[10px] font-bold transition-all tracking-widest uppercase border border-slate-500 text-slate-200 hover:bg-slate-700 hover:text-white active:scale-95"
+                                        disabled={isProcessing}
+                                        className={`flex-1 sm:flex-none px-4 md:px-5 py-2 rounded-lg text-[9px] md:text-[10px] font-bold transition-all tracking-widest uppercase border border-slate-500 ${isProcessing ? 'text-slate-500 border-slate-700 cursor-not-allowed opacity-50' : 'text-slate-200 hover:bg-slate-700 hover:text-white active:scale-95'}`}
                                     >
                                         SAVE
                                     </button>
                                 )}
                                 <button
                                     onClick={handleSave}
-                                    disabled={!!pendingLeaveMessage}
-                                    className={`flex-1 sm:flex-none px-4 md:px-5 py-2 text-white rounded-lg text-[9px] md:text-[10px] font-bold transition-all shadow-lg tracking-widest uppercase ${pendingLeaveMessage
+                                    disabled={isProcessing || !!pendingLeaveMessage || isCurrentWeekAndBeforeFriday()}
+                                    title={isCurrentWeekAndBeforeFriday() ? "Current week's timesheet cannot be submitted until Friday." : undefined}
+                                    className={`flex-1 sm:flex-none px-4 md:px-5 py-2 text-white rounded-lg text-[9px] md:text-[10px] font-bold transition-all shadow-lg tracking-widest uppercase ${(isProcessing || pendingLeaveMessage || isCurrentWeekAndBeforeFriday())
                                         ? 'bg-slate-400 cursor-not-allowed opacity-50 shadow-none'
                                         : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20 active:scale-95'
                                         }`}
                                 >
-                                    SUBMIT SHEET
+                                    {isEditingPending ? 'RESUBMIT SHEET' : 'SUBMIT SHEET'}
                                 </button>
                             </>
-                        ) : (weekData.status === 'Pending' && onApprove && onReject && !disabledAccount && String(employeeId) !== String(JSON.parse(localStorage.getItem("user"))?.employeeId)) && (
+                        ) : (
                             <>
-                                <button onClick={() => onApprove(weekData)} className="flex-1 sm:flex-none px-4 md:px-5 py-2 bg-emerald-600 text-white rounded-lg text-[9px] md:text-[10px] font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20 active:scale-95 tracking-widest uppercase">
-                                    APPROVE
-                                </button>
-                                <button onClick={() => onReject(weekData)} className="flex-1 sm:flex-none px-4 md:px-5 py-2 bg-red-600 text-white rounded-lg text-[9px] md:text-[10px] font-bold hover:bg-red-500 transition-all shadow-lg shadow-red-600/20 active:scale-95 tracking-widest uppercase">
-                                    REJECT
-                                </button>
+                                {weekData.status === 'Pending' && String(employeeId) === String(JSON.parse(localStorage.getItem("user"))?.employeeId) && !isEditingPending && (
+                                    <button
+                                        onClick={() => setIsEditingPending(true)}
+                                        disabled={isProcessing}
+                                        className={`flex-1 sm:flex-none px-4 md:px-5 py-2 text-white rounded-lg text-[9px] md:text-[10px] font-bold transition-all shadow-lg tracking-widest uppercase ${isProcessing ? 'bg-slate-400 cursor-not-allowed opacity-50 shadow-none' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20 active:scale-95'}`}
+                                    >
+                                        EDIT
+                                    </button>
+                                )}
+                                {(weekData.status === 'Pending' && onApprove && onReject && !disabledAccount && String(employeeId) !== String(JSON.parse(localStorage.getItem("user"))?.employeeId)) && (
+                                    <>
+                                        <button
+                                            disabled={isProcessing}
+                                            onClick={async () => {
+                                                setIsProcessing(true);
+                                                try {
+                                                    await onApprove(weekData);
+                                                } catch (err) {
+                                                    console.error(err);
+                                                } finally {
+                                                    setIsProcessing(false);
+                                                }
+                                            }}
+                                            className={`flex-1 sm:flex-none px-4 md:px-5 py-2 text-white rounded-lg text-[9px] md:text-[10px] font-bold transition-all shadow-lg tracking-widest uppercase ${isProcessing ? 'bg-slate-400 cursor-not-allowed opacity-50 shadow-none' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20 active:scale-95'}`}
+                                        >
+                                            APPROVE
+                                        </button>
+                                        <button
+                                            disabled={isProcessing}
+                                            onClick={async () => {
+                                                setIsProcessing(true);
+                                                try {
+                                                    await onReject(weekData);
+                                                } catch (err) {
+                                                    console.error(err);
+                                                } finally {
+                                                    setIsProcessing(false);
+                                                }
+                                            }}
+                                            className={`flex-1 sm:flex-none px-4 md:px-5 py-2 text-white rounded-lg text-[9px] md:text-[10px] font-bold transition-all shadow-lg tracking-widest uppercase ${isProcessing ? 'bg-slate-400 cursor-not-allowed opacity-50 shadow-none' : 'bg-red-600 hover:bg-red-500 shadow-red-600/20 active:scale-95'}`}
+                                        >
+                                            REJECT
+                                        </button>
+                                    </>
+                                )}
+                                {weekData.status === 'Approved' && isAdmin && !isReapplyUsed && !disabledAccount && (
+                                    <button
+                                        onClick={handleRejectApprovedTimesheet}
+                                        disabled={isProcessing}
+                                        className={`flex-1 sm:flex-none px-4 md:px-5 py-2 text-white rounded-lg text-[9px] md:text-[10px] font-bold transition-all shadow-lg tracking-widest uppercase ${isProcessing ? 'bg-slate-400 cursor-not-allowed opacity-50 shadow-none' : 'bg-red-600 hover:bg-red-500 shadow-red-600/20 active:scale-95'}`}
+                                    >
+                                        REJECT & REQUEST REAPPLY
+                                    </button>
+                                )}
                             </>
                         )}
                     </div>
@@ -619,22 +910,22 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                 {projectRows.map((row, index) => (
                                     <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
                                         <td className="p-0.5 border-r border-slate-300">
-                                            <input type="text" value={row.projectId} maxLength={32} onChange={(e) => handleRowChange(index, 'projectId', e.target.value)} className="w-full p-1 text-[10px] border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white outline-none" />
+                                            <input type="text" value={row.projectId} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'projectId', e.target.value)} className={`w-full p-1 text-[10px] border rounded bg-transparent outline-none ${validationErrors.projectIds[index] ? 'border-red-500 bg-red-50/50' : 'border-transparent'} ${readOnly ? 'text-slate-400 cursor-not-allowed' : 'hover:border-slate-200 focus:border-indigo-500 focus:bg-white text-slate-700'}`} />
                                         </td>
                                         <td className="p-0.5 border-r border-slate-300">
-                                            <input type="text" value={row.projectName} maxLength={32} onChange={(e) => handleRowChange(index, 'projectName', e.target.value)} className="w-full p-1 text-[10px] border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white outline-none" />
+                                            <input type="text" value={row.projectName} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'projectName', e.target.value)} className={`w-full p-1 text-[10px] border rounded bg-transparent outline-none ${validationErrors.projectNames[index] ? 'border-red-500 bg-red-50/50' : 'border-transparent'} ${readOnly ? 'text-slate-400 cursor-not-allowed' : 'hover:border-slate-200 focus:border-indigo-500 focus:bg-white text-slate-700'}`} />
                                         </td>
                                         <td className="p-0.5 border-r border-slate-300">
-                                            <input type="text" value={row.taskId} maxLength={32} onChange={(e) => handleRowChange(index, 'taskId', e.target.value)} className="w-full p-1 text-[10px] border border-transparent hover:border-slate-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white outline-none" />
+                                            <input type="text" value={row.taskId} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'taskId', e.target.value)} className={`w-full p-1 text-[10px] border border-transparent rounded bg-transparent outline-none ${readOnly ? 'text-slate-400 cursor-not-allowed' : 'hover:border-slate-200 focus:border-indigo-500 focus:bg-white text-slate-700'}`} />
                                         </td>
                                         <td className="p-0.5 border-r border-slate-300">
-                                            <select value={row.onsite} onChange={(e) => handleRowChange(index, 'onsite', e.target.value)} className="w-full p-1 text-[10px] bg-transparent outline-none">
+                                            <select value={row.onsite} disabled={readOnly} onChange={(e) => handleRowChange(index, 'onsite', e.target.value)} className={`w-full p-1 text-[10px] bg-transparent outline-none ${readOnly ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700'}`}>
                                                 <option>Onsite</option>
                                                 <option>Offshore</option>
                                             </select>
                                         </td>
                                         <td className="p-0.5 border-r border-slate-300">
-                                            <select value={row.billable} onChange={(e) => handleRowChange(index, 'billable', e.target.value)} className="w-full p-1 text-[10px] bg-transparent outline-none">
+                                            <select value={row.billable} disabled={readOnly} onChange={(e) => handleRowChange(index, 'billable', e.target.value)} className={`w-full p-1 text-[10px] bg-transparent outline-none ${readOnly ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700'}`}>
                                                 <option>Billable</option>
                                                 <option>Non-Billable</option>
                                             </select>
@@ -654,19 +945,27 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                         {row.hours.map((h, i) => {
                                             const weekend = isWeekend(dates[i]);
                                             const future = isFutureDate(dates[i]);
-                                            const locked = weekend || readOnly || isHolidayDay(i) || future;
+                                            const beforeJoin = isBeforeJoiningDate(dates[i]);
+                                            const holidayHrs = parseFloat(leaveRows.holiday[i]?.value || 0);
+                                            const leaveSHrs = parseFloat(leaveRows.leaveS[i]?.value || 0);
+                                            const leaveCHrs = parseFloat(leaveRows.leaveC[i]?.value || 0);
+                                            const leaveEHrs = parseFloat(leaveRows.leaveE[i]?.value || 0);
+                                            const leaveLHrs = parseFloat(leaveRows.leaveL[i]?.value || 0);
+                                            const totalOffHrs = holidayHrs + leaveSHrs + leaveCHrs + leaveEHrs + leaveLHrs;
+                                            const isFullDayOff = totalOffHrs >= 8.0;
+                                            const locked = weekend || readOnly || isFullDayOff || future || beforeJoin;
                                             return (
-                                                <td key={i} className={`p-0.5 border-r border-slate-300 ${weekend || future ? 'bg-slate-100' : ''}`}>
+                                                <td key={i} className={`p-0.5 border-r border-slate-300 ${weekend || future || beforeJoin ? 'bg-slate-100' : ''}`}>
                                                     <input
                                                         type="text"
                                                         inputMode="decimal"
                                                         maxLength={2}
                                                         value={h.value}
                                                         disabled={locked}
-                                                        title={future ? 'Future date — not available yet' : undefined}
+                                                        title={future ? 'Future date — not available yet' : beforeJoin ? 'Before joining date' : undefined}
                                                         onKeyDown={handleHoursKeyDown}
                                                         onChange={(e) => handleHourChange(index, i, e.target.value)}
-                                                        className={`w-full p-1 text-[10px] text-center border border-transparent rounded bg-transparent outline-none font-bold ${locked ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:border-slate-200 focus:border-indigo-500 focus:bg-white'}`}
+                                                        className={`w-full p-1 text-[10px] text-center border rounded bg-transparent outline-none font-bold ${validationErrors.invalidDates[i] ? 'border-red-500 bg-red-50/50 text-red-700' : 'border-transparent'} ${locked ? 'text-slate-400 cursor-not-allowed bg-slate-50' : 'text-slate-700 hover:border-slate-200 focus:border-indigo-500 focus:bg-white'}`}
                                                     />
                                                 </td>
                                             );
@@ -675,13 +974,16 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                             {calculateRowTotal(row.hours).toFixed(2)}
                                         </td>
                                         <td className="p-0.5 border-r border-slate-300">
-                                            <input type="text" value={row.comment} maxLength={32} onChange={(e) => handleRowChange(index, 'comment', e.target.value)} className="w-full p-1 text-[10px] bg-transparent outline-none" />
+                                            <input type="text" value={row.comment} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'comment', e.target.value)} className={`w-full p-1 text-[10px] bg-transparent outline-none ${readOnly ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700'}`} />
                                         </td>
                                         <td className="p-0.5 text-center">
                                             {/* Delete row is only available while editing; the read-only detail/audit
                                                 views (Admin/HR/RM/Employee) must not show a delete action. */}
                                             {!readOnly && (
-                                                <button onClick={() => setProjectRows(projectRows.filter((_, idx) => idx !== index))} className="p-1 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                                <button onClick={() => {
+                                                    setIsDirty(true);
+                                                    setProjectRows(projectRows.filter((_, idx) => idx !== index));
+                                                }} className="p-1 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                     </svg>
@@ -720,19 +1022,20 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                     {truTimeRows.swipe.map((h, i) => {
                                         const weekend = isWeekend(dates[i]);
                                         const future = isFutureDate(dates[i]);
-                                        const locked = weekend || readOnly || isHolidayDay(i) || future;
+                                        const beforeJoin = isBeforeJoiningDate(dates[i]);
+                                        const locked = weekend || readOnly || isHolidayDay(i) || future || beforeJoin;
                                         return (
-                                            <td key={i} className={`p-0 border-r border-slate-300 h-8 ${weekend ? 'bg-slate-200' : future ? 'bg-slate-100' : 'bg-slate-50/30'}`}>
+                                            <td key={i} className={`p-0 border-r border-slate-300 h-8 ${weekend ? 'bg-slate-200' : future || beforeJoin ? 'bg-slate-100' : 'bg-slate-50/30'}`}>
                                                 <input
                                                     type="text"
                                                     inputMode="decimal"
                                                     maxLength={2}
                                                     value={h.value}
                                                     disabled={locked}
-                                                    title={future ? 'Future date — not available yet' : undefined}
+                                                    title={future ? 'Future date — not available yet' : beforeJoin ? 'Before joining date' : undefined}
                                                     onKeyDown={handleHoursKeyDown}
                                                     onChange={(e) => handleSwipeChange(i, e.target.value)}
-                                                    className={`w-full h-full text-center outline-none bg-transparent font-bold ${locked ? 'text-slate-400 cursor-not-allowed' : 'text-slate-400'}`}
+                                                    className={`w-full h-full text-center outline-none bg-transparent font-bold ${locked ? 'text-slate-400 cursor-not-allowed bg-slate-50' : 'text-slate-400'}`}
                                                 />
                                             </td>
                                         );
@@ -807,19 +1110,19 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                     <div className="grid grid-cols-2 gap-3">
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Proj ID <span className="text-red-500">*</span></label>
-                                            <input type="text" value={row.projectId} maxLength={32} onChange={(e) => handleRowChange(index, 'projectId', e.target.value)} className="w-full p-2 text-xs bg-slate-50 rounded border-transparent border focus:border-indigo-500 outline-none" />
+                                            <input type="text" value={row.projectId} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'projectId', e.target.value)} className={`w-full p-2 text-xs bg-slate-50 rounded border focus:border-indigo-500 outline-none ${validationErrors.projectIds[index] ? 'border-red-500 bg-red-50' : 'border-transparent'} ${readOnly ? 'text-slate-400 cursor-not-allowed bg-slate-100' : 'text-slate-700'}`} />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Proj Name <span className="text-red-500">*</span></label>
-                                            <input type="text" value={row.projectName} maxLength={32} onChange={(e) => handleRowChange(index, 'projectName', e.target.value)} className="w-full p-2 text-xs bg-slate-50 rounded border-transparent border focus:border-indigo-500 outline-none" />
+                                            <input type="text" value={row.projectName} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'projectName', e.target.value)} className={`w-full p-2 text-xs bg-slate-50 rounded border focus:border-indigo-500 outline-none ${validationErrors.projectNames[index] ? 'border-red-500 bg-red-50' : 'border-transparent'} ${readOnly ? 'text-slate-400 cursor-not-allowed bg-slate-100' : 'text-slate-700'}`} />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Task ID</label>
-                                            <input type="text" value={row.taskId} maxLength={32} onChange={(e) => handleRowChange(index, 'taskId', e.target.value)} className="w-full p-2 text-xs bg-slate-50 rounded border-transparent border focus:border-indigo-500 outline-none" />
+                                            <input type="text" value={row.taskId} disabled={readOnly} maxLength={32} onChange={(e) => handleRowChange(index, 'taskId', e.target.value)} className={`w-full p-2 text-xs bg-slate-50 rounded border-transparent border focus:border-indigo-500 outline-none ${readOnly ? 'text-slate-400 cursor-not-allowed bg-slate-100' : 'text-slate-700'}`} />
                                         </div>
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Location</label>
-                                            <select value={row.location} onChange={(e) => handleRowChange(index, 'location', e.target.value)} className="w-full p-2 text-xs bg-slate-50 rounded outline-none border-transparent border focus:border-indigo-500">
+                                            <select value={row.location} disabled={readOnly} onChange={(e) => handleRowChange(index, 'location', e.target.value)} className={`w-full p-2 text-xs bg-slate-50 rounded outline-none border-transparent border focus:border-indigo-500 ${readOnly ? 'text-slate-400 cursor-not-allowed bg-slate-100' : 'text-slate-700'}`}>
                                                 <option value="India">India</option>
                                                 <option value="Japan">Japan</option>
                                                 <option value="Singapore">Singapore</option>
@@ -831,7 +1134,14 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                         <div className="grid grid-cols-7 gap-1">
                                             {row.hours.map((h, i) => {
                                                 const future = isFutureDate(dates[i]);
-                                                const locked = isWeekend(dates[i]) || readOnly || isHolidayDay(i) || future;
+                                                const holidayHrs = parseFloat(leaveRows.holiday[i]?.value || 0);
+                                                const leaveSHrs = parseFloat(leaveRows.leaveS[i]?.value || 0);
+                                                const leaveCHrs = parseFloat(leaveRows.leaveC[i]?.value || 0);
+                                                const leaveEHrs = parseFloat(leaveRows.leaveE[i]?.value || 0);
+                                                const leaveLHrs = parseFloat(leaveRows.leaveL[i]?.value || 0);
+                                                const totalOffHrs = holidayHrs + leaveSHrs + leaveCHrs + leaveEHrs + leaveLHrs;
+                                                const isFullDayOff = totalOffHrs >= 8.0;
+                                                const locked = isWeekend(dates[i]) || readOnly || isFullDayOff || future || isBeforeJoiningDate(dates[i]);
                                                 return (
                                                 <div key={i} className="flex flex-col items-center">
                                                     <span className="text-[7px] font-bold text-slate-400 mb-1">
@@ -843,10 +1153,10 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                                         maxLength={2}
                                                         value={h.value}
                                                         disabled={locked}
-                                                        title={future ? 'Future date — not available yet' : undefined}
+                                                        title={future ? 'Future date — not available yet' : isBeforeJoiningDate(dates[i]) ? 'Before joining date' : undefined}
                                                         onKeyDown={handleHoursKeyDown}
                                                         onChange={(e) => handleHourChange(index, i, e.target.value)}
-                                                        className={`w-full h-8 p-0 text-center text-[10px] font-bold rounded ${locked ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-indigo-50 text-indigo-700 border-indigo-200 border focus:border-indigo-500'} outline-none`}
+                                                        className={`w-full h-8 p-0 text-center text-[10px] font-bold rounded border outline-none ${validationErrors.invalidDates[i] ? 'border-red-500 bg-red-50 text-red-700' : locked ? 'bg-slate-100 text-slate-300 cursor-not-allowed border-transparent' : 'bg-indigo-50 text-indigo-700 border-indigo-200 focus:border-indigo-500'}`}
                                                     />
                                                 </div>
                                                 );
@@ -855,7 +1165,10 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                     </div>
                                     <div className="flex justify-between items-center pt-2 border-t border-slate-50">
                                         <span className="text-[10px] font-black text-slate-400 uppercase">Total: <span className="text-slate-700">{calculateRowTotal(row.hours).toFixed(2)}</span></span>
-                                        <button onClick={() => setProjectRows(projectRows.filter((_, idx) => idx !== index))} className="text-red-500 text-[10px] font-bold uppercase tracking-widest">Remove</button>
+                                        <button onClick={() => {
+                                            setIsDirty(true);
+                                            setProjectRows(projectRows.filter((_, idx) => idx !== index));
+                                        }} className="text-red-500 text-[10px] font-bold uppercase tracking-widest">Remove</button>
                                     </div>
                                 </div>
                             ))}
@@ -879,7 +1192,7 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                                 <div className="grid grid-cols-7 gap-1">
                                                     {data.map((h, i) => {
                                                         const future = isFutureDate(dates[i]);
-                                                        const locked = key === 'holiday' || key.startsWith('leave') || readOnly || isWeekend(dates[i]) || future;
+                                                        const locked = key === 'holiday' || key.startsWith('leave') || readOnly || isWeekend(dates[i]) || future || (key === 'swipe' && isBeforeJoiningDate(dates[i]));
                                                         return (
                                                         <input
                                                             key={i}
@@ -888,10 +1201,10 @@ const WeeklyTimesheetGrid = ({ weekData, onBack, onSave, onSaveDraft, employeeId
                                                             maxLength={2}
                                                             value={h.value}
                                                             disabled={locked}
-                                                            title={future ? 'Future date — not available yet' : undefined}
+                                                            title={future ? 'Future date — not available yet' : (key === 'swipe' && isBeforeJoiningDate(dates[i])) ? 'Before joining date' : undefined}
                                                             onKeyDown={handleHoursKeyDown}
                                                             onChange={(e) => key === 'swipe' ? handleSwipeChange(i, e.target.value) : handleLeaveHourChange(key, i, e.target.value)}
-                                                            className={`w-full h-8 p-0 text-center text-[10px] font-bold rounded ${key === 'holiday' ? 'bg-amber-100/50 text-amber-700 cursor-not-allowed' : key.startsWith('leave') ? 'bg-rose-50 text-rose-600/60 cursor-not-allowed' : future ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-slate-50 text-slate-400'} border-transparent border outline-none`}
+                                                            className={`w-full h-8 p-0 text-center text-[10px] font-bold rounded ${key === 'holiday' ? 'bg-amber-100/50 text-amber-700 cursor-not-allowed' : key.startsWith('leave') ? 'bg-rose-50 text-rose-600/60 cursor-not-allowed' : future || (key === 'swipe' && isBeforeJoiningDate(dates[i])) ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-slate-50 text-slate-400'} border-transparent border outline-none`}
                                                         />
                                                         );
                                                     })}

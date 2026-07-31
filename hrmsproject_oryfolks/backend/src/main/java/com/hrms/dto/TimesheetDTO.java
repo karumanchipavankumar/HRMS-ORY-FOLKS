@@ -36,6 +36,7 @@ public class TimesheetDTO {
     private String category;
     private String leaveType;
     private Integer rowIndex;
+    private Boolean reapplyUsed;
 
     // Getters and Setters
     public Long getId() {
@@ -204,5 +205,13 @@ public class TimesheetDTO {
 
     public void setRowIndex(Integer rowIndex) {
         this.rowIndex = rowIndex;
+    }
+
+    public Boolean getReapplyUsed() {
+        return reapplyUsed;
+    }
+
+    public void setReapplyUsed(Boolean reapplyUsed) {
+        this.reapplyUsed = reapplyUsed;
     }
 }

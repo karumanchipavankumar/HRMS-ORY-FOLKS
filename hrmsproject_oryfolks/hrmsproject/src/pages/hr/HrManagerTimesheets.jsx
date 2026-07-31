@@ -209,8 +209,13 @@ export default function HrManagerTimesheets() {
             else if (entry.billable) empWeek.billableHrs += entry.totalHours;
             else empWeek.nonBillableHrs += entry.totalHours;
 
-            if (entry.status === 'PENDING') empWeek.status = 'Pending';
-            else if (entry.status === 'REJECTED' && empWeek.status !== 'Pending') empWeek.status = 'Rejected';
+            if (entry.status === 'PENDING') {
+                empWeek.status = entry.reapplyUsed ? 'Reapproval Pending' : 'Pending';
+            } else if (entry.status === 'REAPPLY_REQUESTED' && empWeek.status !== 'Pending' && empWeek.status !== 'Reapproval Pending') {
+                empWeek.status = 'Reapply Requested';
+            } else if (entry.status === 'REJECTED' && empWeek.status !== 'Pending' && empWeek.status !== 'Reapproval Pending') {
+                empWeek.status = 'Rejected';
+            }
         });
 
         const result = Object.values(weeksMap).map(w => ({

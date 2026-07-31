@@ -10,6 +10,7 @@ export default function CandidatesPage() {
   const { employees, loading, error, refresh } = useEmployees();
   const [localEmployees, setLocalEmployees] = useState([]);
   const [assignmentsMap, setAssignmentsMap] = useState({});
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [toast, setToast] = useState(null);
   const [user, setUser] = useState({});
@@ -23,6 +24,8 @@ export default function CandidatesPage() {
   const [roleFilter, setRoleFilter] = useState("All");
   const [idSort, setIdSort] = useState("");
   const [nameSort, setNameSort] = useState("");
+  const [editingHrEmployeeId, setEditingHrEmployeeId] = useState(null);
+  const [tempHrId, setTempHrId] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -34,30 +37,36 @@ export default function CandidatesPage() {
     setLocalEmployees(employees || []);
   }, [employees]);
 
-  useEffect(() => {
-    const fetchAssignments = async () => {
-      try {
-        const res = await api("/api/reporting-managers/assignments");
-        if (!res.ok) return;
+  const fetchAssignments = async () => {
+    setAssignmentsLoading(true);
+    try {
+      const res = await api("/api/reporting-managers/assignments");
+      if (res.ok) {
         const list = await res.json();
         const map = {};
         (list || []).forEach((it) => {
           if (it && it.employeeId) {
             map[it.employeeId] = {
+              managerId: it.reportingManagerId || null,
               managerName: it.reportingManagerName || null,
               managerEmail: it.reportingManagerEmail || null,
               managerRole: it.reportingManagerRole || null,
+              hrId: it.hrId || null,
               hrName: it.hrName || null,
               hrRole: it.hrRole || null,
             };
           }
         });
         setAssignmentsMap(map);
-      } catch (e) {
-        console.error("Failed to load assignments", e);
       }
-    };
+    } catch (e) {
+      console.error("Failed to load assignments", e);
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchAssignments();
   }, []);
 
@@ -141,6 +150,7 @@ export default function CandidatesPage() {
 
   const adminUser = (localEmployees || []).find((emp) => emp.role === 'ADMIN') || (user && user.role === 'ADMIN' ? user : null);
   const adminName = adminUser ? (adminUser.lastName?.toLowerCase() === 'admin' ? adminUser.firstName : `${adminUser.firstName} ${adminUser.lastName}`) : 'Admin';
+  const activeHRs = (localEmployees || []).filter(e => e.role === 'HR' && e.active !== false);
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
@@ -168,7 +178,9 @@ export default function CandidatesPage() {
   };
 
   const handleViewProfile = (emp) => {
-    navigate(`/admin/employee/${emp.id}`, { state: emp });
+    if (window.confirm("Are you sure you want to view this employee's profile?")) {
+      navigate(`/admin/employee/${emp.id}`, { state: emp });
+    }
   };
 
   const handleStatusChange = async (emp, active) => {
@@ -213,10 +225,53 @@ export default function CandidatesPage() {
     }
   };
 
+  const handleSaveHrUpdate = async (employeeId, hrId) => {
+    if (!window.confirm("Are you sure you want to change the HR Liaison for this employee?")) {
+      return;
+    }
+    const currentManagerId = assignmentsMap[employeeId]?.managerId || null;
+    try {
+      const res = await api("/api/reporting-managers", {
+        method: "POST",
+        body: JSON.stringify({
+          employeeId,
+          reportingManagerId: currentManagerId,
+          hrId: hrId ? parseInt(hrId) : null
+        })
+      });
+      if (!res.ok) {
+        throw new Error("Failed to update HR liaison");
+      }
+      await fetchAssignments();
+      setEditingHrEmployeeId(null);
+      showToast("HR Liaison updated successfully", "success");
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || "Failed to update HR Liaison", "error");
+    }
+  };
+
   // Before disabling or deleting, check the backend for pending timesheets/leaves.
   // If any exist, show a blocking modal instead of the confirmation dialog. The
   // backend enforces this too; this pre-check is only for immediate, clearer UX.
   const requestDestructiveAction = async (type, emp) => {
+    if (emp.role === 'HR' && (type === 'disable' || type === 'delete')) {
+      const assignedNames = Object.entries(assignmentsMap)
+        .filter(([empId, assign]) => String(assign.hrId) === String(emp.id))
+        .map(([empId]) => {
+          const e = localEmployees.find(x => String(x.id) === String(empId));
+          return e ? `${e.firstName || ""} ${e.lastName || ""} (${e.role || "Personnel"})` : null;
+        })
+        .filter(Boolean);
+
+      if (assignedNames.length > 0) {
+        alert(`Cannot ${type} this HR account. The following employees/reporting managers are assigned to this HR Liaison:\n\n` +
+          assignedNames.map((name, idx) => `${idx + 1}. ${name}`).join("\n") +
+          `\n\nPlease reassign these employees to another active HR Liaison first.`);
+        return;
+      }
+    }
+
     try {
       const res = await api(`/api/employees/${emp.id}/pending-check`);
       if (res.ok) {
@@ -343,7 +398,7 @@ export default function CandidatesPage() {
             </div>
 
             <div className="overflow-x-auto overflow-y-scroll flex-1 list-scrollbar">
-              {loading ? (
+              {loading || assignmentsLoading ? (
                 <div className="flex flex-col items-center justify-center py-32 space-y-4 opacity-30">
                   <div className="w-12 h-12 border-4 border-brand-blue border-t-transparent rounded-full animate-spin" />
                   <p className="text-[10px] font-black uppercase tracking-widest">Synchronizing Database...</p>
@@ -457,7 +512,7 @@ export default function CandidatesPage() {
                           <tr
                             key={emp.id}
                             className={`group transition-all cursor-pointer ${isInactive ? "bg-gray-100 opacity-60 grayscale hover:opacity-80" : "hover:bg-bg-slate/50"}`}
-                            onClick={() => navigate(`/admin/employee/${emp.id}`, { state: emp })}
+                            onClick={() => handleViewProfile(emp)}
                           >
                             <td className="py-5 px-8">
                               <span className="text-xs font-black text-brand-blue/30 group-hover:text-brand-blue transition-colors">
@@ -491,9 +546,64 @@ export default function CandidatesPage() {
                               </div>
                             </td>
                             <td className="py-5 px-6">
-                              <span className="text-xs font-bold text-brand-blue/60 tabular-nums">
-                                {emp.role === 'HR' ? adminName : (assignmentsMap[emp.id]?.hrName || '–')}
-                              </span>
+                              {emp.role === 'HR' ? (
+                                <span className="text-xs font-bold text-brand-blue/60 tabular-nums">
+                                  {adminName}
+                                </span>
+                              ) : editingHrEmployeeId === emp.id ? (
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <select
+                                    value={tempHrId || ""}
+                                    onChange={(e) => setTempHrId(e.target.value)}
+                                    className="text-xs font-bold text-brand-blue bg-white border border-brand-blue/20 rounded-lg px-2 py-1 outline-none focus:border-brand-blue focus:ring-1 focus:ring-brand-blue/10 max-w-[130px]"
+                                  >
+                                    <option value="">Unassigned</option>
+                                    {activeHRs.map(hr => (
+                                      <option key={hr.id} value={hr.id}>{`${hr.firstName || ""} ${hr.lastName || ""}`}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    onClick={() => handleSaveHrUpdate(emp.id, tempHrId)}
+                                    className="p-1 rounded bg-emerald-500 text-white hover:bg-emerald-600 transition shadow-sm flex items-center justify-center"
+                                    title="Save"
+                                    aria-label="Save"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingHrEmployeeId(null)}
+                                    className="p-1 rounded bg-red-500 text-white hover:bg-red-600 transition shadow-sm flex items-center justify-center"
+                                    title="Cancel"
+                                    aria-label="Cancel"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 group/edit">
+                                  <span className="text-xs font-bold text-brand-blue/60 tabular-nums">
+                                    {assignmentsMap[emp.id]?.hrName || '–'}
+                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingHrEmployeeId(emp.id);
+                                      setTempHrId(assignmentsMap[emp.id]?.hrId || "");
+                                    }}
+                                    className="p-1 rounded-lg bg-brand-blue/5 text-brand-blue hover:bg-brand-blue hover:text-white transition-all shadow-sm flex items-center justify-center"
+                                    title="Edit HR Liaison"
+                                    aria-label="Edit HR Liaison"
+                                  >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              )}
                             </td>
                             {/* <td className="py-5 px-6">
                             <span className="text-xs font-bold text-brand-blue/40 group-hover:text-brand-blue/70 transition-colors tabular-nums underline decoration-brand-blue/5 decoration-2 underline-offset-4">

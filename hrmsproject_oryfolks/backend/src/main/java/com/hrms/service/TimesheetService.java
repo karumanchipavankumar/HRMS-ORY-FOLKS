@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.hrms.repository.EmployeeReportingRepository;
 import com.hrms.model.EmployeeReporting;
+import com.hrms.repository.CompanyDetailRepository;
+import com.hrms.model.CompanyDetail;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -42,6 +44,9 @@ public class TimesheetService {
 
     @Autowired
     private NotificationService notificationService;
+
+    @Autowired
+    private CompanyDetailRepository companyDetailRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -255,6 +260,17 @@ public class TimesheetService {
     public void saveWeeklyTimesheet(Long employeeId, LocalDate weekStart, List<TimesheetDTO> entries) {
         // Rule 1 (backend enforcement): an employee may only submit hours for today and past days.
         validateNoFutureEntries(entries);
+        validateNoEntriesBeforeJoiningDate(employeeId, entries);
+
+        // Validation: Cannot submit timesheet for the current week until Friday.
+        LocalDate today = LocalDate.now();
+        LocalDate weekEnd = weekStart.plusDays(6);
+        if (!today.isBefore(weekStart) && !today.isAfter(weekEnd)) {
+            if (today.isBefore(weekEnd)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Cannot submit timesheet for the current week until Friday.");
+            }
+        }
 
         if (entries != null) {
             java.util.Map<LocalDate, Double> dailyTotals = entries.stream()
@@ -271,10 +287,14 @@ public class TimesheetService {
             }
         }
 
-        LocalDate weekEnd = weekStart.plusDays(6);
-
         // Bulk DELETE via @Modifying @Query — atomic, reliable, flushes & clears
         // automatically
+        boolean wasReapplied = false;
+        List<Timesheet> existing = timesheetRepository.findByEmployeeIdAndDateBetween(employeeId, weekStart, weekEnd);
+        if (existing != null) {
+            wasReapplied = existing.stream().anyMatch(t -> t.getReapplyUsed() != null && t.getReapplyUsed());
+        }
+
         timesheetRepository.deleteByEmployeeIdAndDateBetween(employeeId, weekStart, weekEnd);
 
         System.out.println("[TimesheetService] Deleted existing entries for employeeId=" + employeeId
@@ -314,6 +334,7 @@ public class TimesheetService {
                     timesheet.setCategory(dto.getCategory());
                     timesheet.setLeaveType(dto.getLeaveType());
                     timesheet.setRowIndex(dto.getRowIndex());
+                    timesheet.setReapplyUsed(wasReapplied);
                     // Use totalHours directly from DTO; only compute from times if not provided
                     if (dto.getTotalHours() != null && dto.getTotalHours() > 0) {
                         timesheet.setTotalHours(dto.getTotalHours());
@@ -353,11 +374,30 @@ public class TimesheetService {
         }
     }
 
+    private void validateNoEntriesBeforeJoiningDate(Long employeeId, List<TimesheetDTO> entries) {
+        if (entries == null)
+            return;
+        LocalDate joiningDate = companyDetailRepository.findByEmployee_Id(employeeId)
+                .map(CompanyDetail::getJoiningDate)
+                .orElse(null);
+        if (joiningDate != null) {
+            for (TimesheetDTO dto : entries) {
+                if (dto.getDate() != null && dto.getDate().isBefore(joiningDate)) {
+                    if (dto.getTotalHours() != null && dto.getTotalHours() > 0) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                "Cannot log working hours before your joining date: " + dto.getDate());
+                    }
+                }
+            }
+        }
+    }
+
     // Rule 2: persist the week as a DRAFT without triggering the approval flow.
     // - No existing timesheet for the week, or an existing DRAFT/REJECTED one -> (re)save as DRAFT.
     // - Week already in the approval flow (PENDING) or APPROVED -> reject; it can no longer be edited as a draft.
     public void saveDraftTimesheet(Long employeeId, LocalDate weekStart, List<TimesheetDTO> entries) {
         validateNoFutureEntries(entries);
+        validateNoEntriesBeforeJoiningDate(employeeId, entries);
 
         LocalDate weekEnd = weekStart.plusDays(6);
 
@@ -385,6 +425,11 @@ public class TimesheetService {
         }
 
         // Replace the week's entries with the incoming draft snapshot (mirrors saveWeeklyTimesheet).
+        boolean wasReapplied = false;
+        if (existing != null) {
+            wasReapplied = existing.stream().anyMatch(t -> t.getReapplyUsed() != null && t.getReapplyUsed());
+        }
+
         timesheetRepository.deleteByEmployeeIdAndDateBetween(employeeId, weekStart, weekEnd);
 
         if (entries != null && !entries.isEmpty()) {
@@ -410,6 +455,7 @@ public class TimesheetService {
                 timesheet.setCategory(dto.getCategory());
                 timesheet.setLeaveType(dto.getLeaveType());
                 timesheet.setRowIndex(dto.getRowIndex());
+                timesheet.setReapplyUsed(wasReapplied);
                 if (dto.getTotalHours() != null && dto.getTotalHours() > 0) {
                     timesheet.setTotalHours(dto.getTotalHours());
                 } else if (dto.getStartTime() != null && dto.getEndTime() != null) {
@@ -525,6 +571,51 @@ public class TimesheetService {
         dto.setCategory(timesheet.getCategory());
         dto.setLeaveType(timesheet.getLeaveType());
         dto.setRowIndex(timesheet.getRowIndex());
+        dto.setReapplyUsed(timesheet.getReapplyUsed());
         return dto;
+    }
+
+    public TimesheetDTO requestReapply(Long id, Long reviewerId, String reason) {
+        Timesheet targetTimesheet = timesheetRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Timesheet not found"));
+
+        if (targetTimesheet.getStatus() != TimesheetStatus.APPROVED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only APPROVED timesheets can be requested for reapply");
+        }
+
+        LocalDate date = targetTimesheet.getDate();
+        int dayValue = date.getDayOfWeek().getValue();
+        int daysToSubtract = (dayValue % 7) + 1;
+        if (dayValue == 6) daysToSubtract = 0;
+        else if (dayValue == 7) daysToSubtract = 1;
+        else daysToSubtract = dayValue + 1;
+
+        LocalDate weekStart = date.minusDays(daysToSubtract);
+        LocalDate weekEnd = weekStart.plusDays(6);
+        Long employeeId = targetTimesheet.getEmployee().getId();
+
+        List<Timesheet> weekEntries = timesheetRepository.findByEmployeeIdAndDateBetween(employeeId, weekStart, weekEnd);
+        boolean alreadyUsed = weekEntries.stream().anyMatch(t -> t.getReapplyUsed() != null && t.getReapplyUsed());
+        if (alreadyUsed) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The reapply process has already been used once for this timesheet.");
+        }
+
+        User reviewer = userRepository.findById(reviewerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reviewer not found"));
+
+        for (Timesheet t : weekEntries) {
+            if (t.getStatus() == TimesheetStatus.APPROVED) {
+                t.setStatus(TimesheetStatus.REAPPLY_REQUESTED);
+                t.setReapplyUsed(true);
+                t.setManagerComments(reason);
+                t.setReviewedBy(reviewer);
+                t.setReviewedAt(LocalDateTime.now());
+                timesheetRepository.save(t);
+            }
+        }
+
+        notifyWeeklyTimesheetStatus(targetTimesheet, "Reapply Requested");
+
+        return convertToDTO(targetTimesheet);
     }
 }
