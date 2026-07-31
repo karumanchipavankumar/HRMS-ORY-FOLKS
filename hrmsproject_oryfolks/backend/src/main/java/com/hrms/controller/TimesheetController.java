@@ -149,6 +149,17 @@ public class TimesheetController {
         return ResponseEntity.ok(ApiResponse.success("Timesheet rejected", rejected));
     }
 
+    @PostMapping("/{id}/reapply-request")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<TimesheetDTO>> requestReapply(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> request) {
+        Long reviewerId = Long.valueOf(request.get("reviewerId").toString());
+        String reason = request.getOrDefault("reason", "").toString();
+        TimesheetDTO updated = timesheetService.requestReapply(id, reviewerId, reason);
+        return ResponseEntity.ok(ApiResponse.success("Reapply requested successfully", updated));
+    }
+
     @PostMapping("/save-weekly")
     public ResponseEntity<ApiResponse<Void>> saveWeekly(
             @RequestBody Map<String, Object> request,

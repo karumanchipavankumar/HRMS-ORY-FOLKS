@@ -141,8 +141,13 @@ export default function AdminTimesheets() {
             else if (entry.billable) empWeek.billableHrs += entry.totalHours;
             else empWeek.nonBillableHrs += entry.totalHours;
 
-            if (entry.status === 'PENDING') empWeek.status = 'Pending';
-            else if (entry.status === 'REJECTED' && empWeek.status !== 'Pending') empWeek.status = 'Rejected';
+            if (entry.status === 'PENDING') {
+                empWeek.status = entry.reapplyUsed ? 'Reapproval Pending' : 'Pending';
+            } else if (entry.status === 'REAPPLY_REQUESTED' && empWeek.status !== 'Pending' && empWeek.status !== 'Reapproval Pending') {
+                empWeek.status = 'Reapply Requested';
+            } else if (entry.status === 'REJECTED' && empWeek.status !== 'Pending' && empWeek.status !== 'Reapproval Pending') {
+                empWeek.status = 'Rejected';
+            }
         });
 
         const result = Object.values(weeksMap).map(w => ({
@@ -226,7 +231,14 @@ export default function AdminTimesheets() {
                 (profile?.oryfolksId && profile.oryfolksId.toLowerCase().includes(tsFilter.toLowerCase()));
 
             if (!matchesSearch) return false;
-            if (statusFilter !== "ALL" && (emp.status || "").toUpperCase() !== statusFilter) return false;
+            if (statusFilter !== "ALL") {
+                const empStatus = (emp.status || "").toUpperCase();
+                if (statusFilter === "PENDING") {
+                    if (empStatus !== "PENDING" && empStatus !== "REAPPROVAL PENDING") return false;
+                } else {
+                    if (empStatus !== statusFilter) return false;
+                }
+            }
             if (roleFilter === "ALL") return true;
 
             const role = profile?.role?.toUpperCase() || "";

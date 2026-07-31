@@ -5,6 +5,9 @@ const TimesheetSummary = ({ weeks, onSelectWeek }) => {
 
     const filteredWeeks = weeks.filter(week => {
         if (statusFilter === 'All') return true;
+        if (statusFilter.toLowerCase() === 'pending') {
+            return week.status.toLowerCase() === 'pending' || week.status.toLowerCase() === 'reapproval pending';
+        }
         return week.status.toLowerCase() === statusFilter.toLowerCase();
     });
 

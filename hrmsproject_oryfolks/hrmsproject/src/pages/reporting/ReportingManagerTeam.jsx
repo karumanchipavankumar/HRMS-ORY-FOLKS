@@ -132,6 +132,9 @@ export default function ReportingManagerTeam() {
     };
 
     const handleApproveLeave = async (leaveId) => {
+        if (!window.confirm("check all leaves and timesheets before approving")) {
+            return;
+        }
         // One-time enforcement: block if a decision submission is already in flight
         if (processingId) return;
         setProcessingId(leaveId);
@@ -357,8 +360,13 @@ export default function ReportingManagerTeam() {
             else if (entry.billable) empWeek.billableHrs += entry.totalHours;
             else empWeek.nonBillableHrs += entry.totalHours;
 
-            if (entry.status === 'PENDING') empWeek.status = 'Pending';
-            else if (entry.status === 'REJECTED' && empWeek.status !== 'Pending') empWeek.status = 'Rejected';
+            if (entry.status === 'PENDING') {
+                empWeek.status = entry.reapplyUsed ? 'Reapproval Pending' : 'Pending';
+            } else if (entry.status === 'REAPPLY_REQUESTED' && empWeek.status !== 'Pending' && empWeek.status !== 'Reapproval Pending') {
+                empWeek.status = 'Reapply Requested';
+            } else if (entry.status === 'REJECTED' && empWeek.status !== 'Pending' && empWeek.status !== 'Reapproval Pending') {
+                empWeek.status = 'Rejected';
+            }
         });
 
         const result = Object.values(weeksMap).map(w => ({

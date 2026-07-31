@@ -223,8 +223,13 @@ const ReportingManagerDashboard = () => {
       week.entries.push(entry);
       week.totalHours += entry.totalHours || 0;
 
-      if (entry.status === 'PENDING') week.status = 'PENDING';
-      else if (entry.status === 'REJECTED' && week.status !== 'PENDING') week.status = 'REJECTED';
+      if (entry.status === 'PENDING') {
+          week.status = entry.reapplyUsed ? 'REAPPROVAL_PENDING' : 'PENDING';
+      } else if (entry.status === 'REAPPLY_REQUESTED' && week.status !== 'PENDING' && week.status !== 'REAPPROVAL_PENDING') {
+          week.status = 'REAPPLY_REQUESTED';
+      } else if (entry.status === 'REJECTED' && week.status !== 'PENDING' && week.status !== 'REAPPROVAL_PENDING') {
+          week.status = 'REJECTED';
+      }
     });
 
     return Object.values(weeksMap).sort((a, b) => b.start - a.start);
@@ -618,7 +623,7 @@ const ReportingManagerDashboard = () => {
                             </td>
                             <td className="p-4 px-6">
                               <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${week.status === 'APPROVED' ? 'bg-emerald-500 text-white' : week.status === 'REJECTED' ? 'bg-red-600 text-white' : 'bg-yellow-400 text-slate-900'}`}>
-                                {week.status}
+                                {week.status.replace('_', ' ')}
                               </span>
                             </td>
                             <td className="p-4 px-6 text-center text-brand-blue/60 font-bold text-xs">{getWorkedDays(week.entries)} Days</td>

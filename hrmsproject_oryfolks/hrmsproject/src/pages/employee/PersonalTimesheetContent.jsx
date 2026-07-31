@@ -237,7 +237,9 @@ const PersonalTimesheetContent = ({ employeeId, user, profileResolved = true, in
             // Status precedence for the week: an in-approval-flow status (Pending/Approved/Rejected)
             // always wins over a Draft, so a week is only shown as "Draft" when every entry is a draft.
             if (entry.status === 'PENDING') {
-                week.status = 'Pending';
+                week.status = entry.reapplyUsed ? 'Reapproval Pending' : 'Pending';
+            } else if (entry.status === 'REAPPLY_REQUESTED') {
+                week.status = 'Reapply Requested';
             } else if (entry.status === 'REJECTED') {
                 week.status = 'Rejected';
             } else if (entry.status === 'APPROVED') {
@@ -369,7 +371,7 @@ const PersonalTimesheetContent = ({ employeeId, user, profileResolved = true, in
                     holidays={holidays}
                     // Part 6 — UI state per status: PENDING and APPROVED weeks are read-only.
                     // DRAFT, REJECTED and unfilled weeks stay editable (Save + Submit available).
-                    readOnly={selectedWeek.status === 'Approved' || selectedWeek.status === 'Pending'}
+                    readOnly={selectedWeek.status === 'Approved' || selectedWeek.status === 'Pending' || selectedWeek.status === 'Reapproval Pending'}
                     onBack={() => {
                         if (redirectedFromDashboard && onBackToDashboard) {
                             setRedirectedFromDashboard(false);

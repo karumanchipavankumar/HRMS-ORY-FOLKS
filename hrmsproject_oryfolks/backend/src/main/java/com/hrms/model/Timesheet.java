@@ -52,6 +52,7 @@ public class Timesheet {
     private String category; // PROJECT, TRUTIME, HOLIDAY, LEAVE
     private String leaveType; // S, C, E
     private Integer rowIndex;
+    private Boolean reapplyUsed = false;
 
     @PrePersist
     protected void onCreate() {
@@ -239,5 +240,13 @@ public class Timesheet {
 
     public void setRowIndex(Integer rowIndex) {
         this.rowIndex = rowIndex;
+    }
+
+    public Boolean getReapplyUsed() {
+        return reapplyUsed;
+    }
+
+    public void setReapplyUsed(Boolean reapplyUsed) {
+        this.reapplyUsed = reapplyUsed;
     }
 }

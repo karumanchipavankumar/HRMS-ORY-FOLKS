@@ -28,7 +28,9 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
             // existing NOT NULL constraints, so we do it manually here.
             stmt.execute("ALTER TABLE timesheets ALTER COLUMN start_time DROP NOT NULL");
             stmt.execute("ALTER TABLE timesheets ALTER COLUMN end_time DROP NOT NULL");
-            System.out.println("[DatabaseMigrationRunner] Successfully dropped NOT NULL on start_time/end_time");
+            stmt.execute("ALTER TABLE timesheets DROP CONSTRAINT IF EXISTS timesheets_status_check");
+            stmt.execute("ALTER TABLE timesheets ADD CONSTRAINT timesheets_status_check CHECK (status IN ('DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'REAPPLY_REQUESTED'))");
+            System.out.println("[DatabaseMigrationRunner] Successfully dropped NOT NULL and updated status constraints");
         } catch (Exception e) {
             // Column might already be nullable (idempotent) or table might not exist yet — both fine
             System.out.println("[DatabaseMigrationRunner] Note: " + e.getMessage());

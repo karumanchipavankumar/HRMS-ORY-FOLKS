@@ -24,6 +24,9 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
   const [holidays, setHolidays] = useState([]);
   const [selectedLeave, setSelectedLeave] = useState(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [joiningDate, setJoiningDate] = useState(null);
+  const [timesheets, setTimesheets] = useState([]);
+  const [dateError, setDateError] = useState(false);
 
   // Fetch all leaves for this employee
   const fetchLeaveHistory = async () => {
@@ -68,13 +71,144 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
     }
   };
 
+  const fetchCompanyDetails = async () => {
+    if (!employeeId) return;
+    try {
+      const response = await api(`/api/company-details/employee/${employeeId}`);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.data && result.data.joiningDate) {
+          setJoiningDate(result.data.joiningDate);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching company details:", err);
+    }
+  };
+
+  const fetchTimesheets = async () => {
+    if (!employeeId) return;
+    try {
+      const response = await api(`/api/timesheets?employeeId=${employeeId}`);
+      if (response.ok) {
+        const result = await response.json();
+        setTimesheets(result.data || []);
+      }
+    } catch (err) {
+      console.error("Error fetching timesheets:", err);
+    }
+  };
+
   useEffect(() => {
     fetchLeaveHistory();
     fetchHolidays();
+    fetchCompanyDetails();
+    fetchTimesheets();
   }, [employeeId]);
+
+  const parseDateLocal = (d) => {
+    if (!d) return new Date();
+    if (d instanceof Date) return new Date(d);
+    const s = d.toString().split('T')[0];
+    const parts = s.split('-');
+    if (parts.length === 3) {
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+    return new Date(d);
+  };
+
+  const getLocalDateStr = (date) => {
+    if (!date) return "";
+    const d = date instanceof Date ? date : new Date(date);
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getMinAllowedDate = () => {
+    const today = new Date();
+    const past30 = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    if (joiningDate) {
+      const jDate = parseDateLocal(joiningDate);
+      const targetDate = jDate > past30 ? jDate : past30;
+      return getLocalDateStr(targetDate);
+    }
+    
+    return getLocalDateStr(past30);
+  };
+
+  const hasSubmittedOrApprovedTimesheet = () => {
+    if (!formData.startDate || !formData.endDate || timesheets.length === 0) return false;
+
+    // Helper to get week start date for a given date string (Saturday to Friday week)
+    const getWeekStartDate = (dateStr) => {
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return null;
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      
+      const dayOfWeek = d.getDay(); // 0 is Sunday, 6 is Saturday
+      const diff = (dayOfWeek + 1) % 7; // diff from Saturday
+      d.setDate(d.getDate() - diff);
+      d.setHours(0, 0, 0, 0);
+      
+      // format as YYYY-MM-DD
+      const y = d.getFullYear();
+      const m = (d.getMonth() + 1).toString().padStart(2, '0');
+      const da = d.getDate().toString().padStart(2, '0');
+      return `${y}-${m}-${da}`;
+    };
+
+    // Calculate all unique week starts covered by the leave dates
+    const leaveWeeks = new Set();
+    let curr = new Date(formData.startDate);
+    const endVal = new Date(formData.endDate);
+    while (curr <= endVal) {
+      const iso = curr.toISOString().slice(0, 10);
+      const weekStart = getWeekStartDate(iso);
+      if (weekStart) leaveWeeks.add(weekStart);
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    // Now, group timesheet entries by their week start
+    const weeksMap = {};
+    timesheets.forEach(entry => {
+      if (!entry.date) return;
+      const iso = entry.date.split('T')[0];
+      const weekStart = getWeekStartDate(iso);
+      if (!weekStart) return;
+
+      if (!weeksMap[weekStart]) {
+        weeksMap[weekStart] = { entries: [] };
+      }
+      weeksMap[weekStart].entries.push(entry);
+    });
+
+    // Check if any leave week has submitted or approved timesheet entries
+    for (let ws of leaveWeeks) {
+      const week = weeksMap[ws];
+      if (week && week.entries.length > 0) {
+        // If any entry in this week is PENDING or APPROVED
+        const hasSubmittedOrApproved = week.entries.some(entry => 
+          entry.status === 'PENDING' || entry.status === 'APPROVED'
+        );
+        if (hasSubmittedOrApproved) return true;
+      }
+    }
+
+    return false;
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+
+    if (name === 'startDate' || name === 'endDate') {
+      setDateError(false);
+    }
 
     setFormData((prev) => {
       const newState = { ...prev, [name]: value };
@@ -82,6 +216,38 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
       // If dates changed, sync the breakdown
       if (name === 'startDate' || name === 'endDate') {
         if (newState.startDate && newState.endDate) {
+          let d = parseDateLocal(newState.startDate);
+          const endDateObj = parseDateLocal(newState.endDate);
+          const holidayDates = holidays.map(h => h.holidayDate);
+          let rangeInvalid = false;
+
+          while (d <= endDateObj) {
+            const iso = getLocalDateStr(d);
+            const isHoliday = holidayDates.includes(iso);
+            const isBlocked = blockedDates.includes(iso);
+            
+            if (isHoliday) {
+              const formattedDate = d.toLocaleDateString('en-GB');
+              toast.error(`Date ${formattedDate} is a holiday.`);
+              rangeInvalid = true;
+              break;
+            }
+            if (isBlocked) {
+              const formattedDate = d.toLocaleDateString('en-GB');
+              toast.error(`Leave request is already pending/approved for ${formattedDate}.`);
+              rangeInvalid = true;
+              break;
+            }
+            d.setDate(d.getDate() + 1);
+          }
+
+          if (rangeInvalid) {
+            setDateError(true);
+            newState.sessionData = {};
+            newState.daysCount = 0;
+            return newState;
+          }
+
           const sessions = { ...prev.sessionData };
           const range = getDatesInRange(newState.startDate, newState.endDate);
 
@@ -219,6 +385,40 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
     if (new Date(formData.startDate) > new Date(formData.endDate)) {
       toast.error('Start date cannot be after end date');
       return;
+    }
+
+    const minAllowed = getMinAllowedDate();
+    if (formData.startDate < minAllowed) {
+      toast.error(`Start date cannot be before ${minAllowed}`);
+      return;
+    }
+
+    if (dateError) {
+      toast.error('Please select valid dates.');
+      return;
+    }
+
+    let dVal = parseDateLocal(formData.startDate);
+    const endObjVal = parseDateLocal(formData.endDate);
+    const holidayDates = holidays.map(h => h.holidayDate);
+    while (dVal <= endObjVal) {
+      const iso = getLocalDateStr(dVal);
+      if (holidayDates.includes(iso)) {
+        toast.error(`Date ${dVal.toLocaleDateString('en-GB')} is a holiday.`);
+        setDateError(true);
+        return;
+      }
+      if (blockedDates.includes(iso)) {
+        toast.error(`Leave request is already pending/approved for ${dVal.toLocaleDateString('en-GB')}.`);
+        setDateError(true);
+        return;
+      }
+      dVal.setDate(dVal.getDate() + 1);
+    }
+
+    if (hasSubmittedOrApprovedTimesheet()) {
+      const proceed = window.confirm("Your timesheet(s) will need to be resubmitted once your leave gets approved. Do you want to proceed?");
+      if (!proceed) return;
     }
 
     // Calculate days requested
@@ -498,17 +698,23 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                       name="startDate"
                       value={formData.startDate}
                       onChange={handleInputChange}
-                      min={new Date().toISOString().slice(0, 10)}
+                      min={getMinAllowedDate()}
                       onBlur={e => {
-                        const d = new Date(e.target.value);
                         const iso = e.target.value;
+                        const minDateVal = getMinAllowedDate();
+                        if (iso && iso < minDateVal) {
+                          toast.error(`Start date cannot be before ${minDateVal}`);
+                          setDateError(true);
+                          return;
+                        }
+                        const d = parseDateLocal(iso);
                         const isHoliday = holidays.some(h => h.holidayDate === iso);
                         if (iso && (d.getDay() === 0 || d.getDay() === 6 || blockedDates.includes(iso) || isHoliday)) {
                           toast.error(isHoliday ? 'Start date cannot be a holiday.' : 'Start date cannot be a weekend or already requested/approved leave.');
-                          setFormData(f => ({ ...f, startDate: '' }));
+                          setDateError(true);
                         }
                       }}
-                      className="w-full px-5 py-4 bg-bg-slate border-2 border-transparent focus:border-brand-yellow rounded-2xl text-sm font-bold text-brand-blue outline-none transition-all shadow-sm"
+                      className={`w-full px-5 py-4 bg-bg-slate border-2 rounded-2xl text-sm font-bold text-brand-blue outline-none transition-all shadow-sm ${dateError ? 'border-red-500 bg-red-50/50' : 'border-transparent focus:border-brand-yellow'}`}
                     />
                   </div>
 
@@ -519,20 +725,32 @@ const LeaveRequestPage = ({ employeeId, leaveBalance, onLeaveRequestSuccess }) =
                       name="endDate"
                       value={formData.endDate}
                       onChange={handleInputChange}
-                      min={formData.startDate || new Date().toISOString().slice(0, 10)}
+                      min={formData.startDate || getMinAllowedDate()}
                       onBlur={e => {
-                        const d = new Date(e.target.value);
                         const iso = e.target.value;
+                        const minDateVal = getMinAllowedDate();
+                        if (iso && iso < minDateVal) {
+                          toast.error(`End date cannot be before ${minDateVal}`);
+                          setDateError(true);
+                          return;
+                        }
+                        const d = parseDateLocal(iso);
                         const isHoliday = holidays.some(h => h.holidayDate === iso);
                         if (iso && (d.getDay() === 0 || d.getDay() === 6 || blockedDates.includes(iso) || isHoliday)) {
                           toast.error(isHoliday ? 'End date cannot be a holiday.' : 'End date cannot be a weekend or already requested/approved leave.');
-                          setFormData(f => ({ ...f, endDate: '' }));
+                          setDateError(true);
                         }
                       }}
-                      className="w-full px-5 py-4 bg-bg-slate border-2 border-transparent focus:border-brand-yellow rounded-2xl text-sm font-bold text-brand-blue outline-none transition-all shadow-sm"
+                      className={`w-full px-5 py-4 bg-bg-slate border-2 rounded-2xl text-sm font-bold text-brand-blue outline-none transition-all shadow-sm ${dateError ? 'border-red-500 bg-red-50/50' : 'border-transparent focus:border-brand-yellow'}`}
                     />
                   </div>
                 </div>
+
+                {hasSubmittedOrApprovedTimesheet() && (
+                  <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl text-[10px] font-black text-amber-700 uppercase tracking-wider animate-pulse">
+                    ⚠ Note: Your timesheet(s) will need to be resubmitted once your leave gets approved.
+                  </div>
+                )}
 
                 {/* Daily Breakdown Section */}
                 {formData.startDate && formData.endDate && Object.keys(formData.sessionData).length > 0 && (

@@ -99,6 +99,9 @@ export default function HrManagerLeaves() {
     };
 
     const handleApprove = async (leaveId) => {
+        if (!window.confirm("check all leaves and timesheets before approving")) {
+            return;
+        }
         // One-time enforcement: block if a decision submission is already in flight
         if (processingId) return;
         setProcessingId(leaveId);

@@ -81,6 +81,12 @@ export default function HrCandidatesPage() {
     }
   };
 
+  const handleViewProfile = (emp) => {
+    if (window.confirm("Are you sure you want to view this employee's profile?")) {
+      navigate(`/admin/employee/${emp.id}`, { state: emp });
+    }
+  };
+
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
   };
@@ -440,7 +446,7 @@ export default function HrCandidatesPage() {
                         <tr
                           key={emp.id}
                           className={`group hover:bg-bg-slate/50 transition-all cursor-pointer ${emp.active === false ? 'opacity-60' : ''}`}
-                          onClick={() => navigate(`/admin/employee/${emp.id}`, { state: emp })}
+                          onClick={() => handleViewProfile(emp)}
                         >
                           <td className="py-5 px-8">
                             <span className="text-xs font-black text-brand-blue/30 group-hover:text-brand-blue">

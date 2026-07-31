@@ -16,6 +16,9 @@ import com.hrms.repository.LeaveRepository;
 import com.hrms.repository.LeaveBalanceRepository;
 import com.hrms.repository.UserRepository;
 import com.hrms.repository.LeaveDayDetailRepository;
+import com.hrms.repository.TimesheetRepository;
+import com.hrms.model.Timesheet;
+import com.hrms.model.TimesheetStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -66,6 +69,9 @@ public class LeaveService {
 
     @Autowired
     private NotificationService notificationService;
+
+    @Autowired
+    private TimesheetRepository timesheetRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -118,6 +124,16 @@ public class LeaveService {
         }
 
         LocalDate now = LocalDate.now();
+        LocalDate minAllowedDate = now.minusDays(30);
+        if (detail.getJoiningDate().isAfter(minAllowedDate)) {
+            minAllowedDate = detail.getJoiningDate();
+        }
+
+        if (dto.getStartDate().isBefore(minAllowedDate)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, 
+                "Leave start date cannot be before " + minAllowedDate);
+        }
+
         LocalDate eligibilityDateStage1 = detail.getJoiningDate().plusMonths(6);
         LocalDate elEligibilityDate = detail.getJoiningDate().plusYears(1);
 
@@ -390,6 +406,9 @@ public class LeaveService {
         leave.setReviewedAt(LocalDateTime.now());
 
         Leave approved = leaveRepository.save(leave);
+
+        // Transition any submitted or approved timesheets that cover the leave dates to REAPPLY_REQUESTED
+        transitionTimesheetsToReapply(approved);
 
         // Send Status Email
         sendStatusEmail(approved);
@@ -744,5 +763,65 @@ public class LeaveService {
         });
 
         return dto;
+    }
+
+    private java.time.LocalDate getWeekStart(java.time.LocalDate date) {
+        int dayValue = date.getDayOfWeek().getValue();
+        int daysToSubtract;
+        if (dayValue == 6)
+            daysToSubtract = 0; // Saturday
+        else if (dayValue == 7)
+            daysToSubtract = 1; // Sunday
+        else
+            daysToSubtract = dayValue + 1; // Mon=2, Tue=3, etc.
+        return date.minusDays(daysToSubtract);
+    }
+
+    private void transitionTimesheetsToReapply(Leave leave) {
+        LocalDate start = leave.getStartDate();
+        LocalDate end = leave.getEndDate();
+        Long employeeId = leave.getEmployee().getId();
+
+        // Calculate all unique week starts covered by the leave dates
+        java.util.Set<LocalDate> weekStarts = new java.util.HashSet<>();
+        LocalDate current = start;
+        while (!current.isAfter(end)) {
+            weekStarts.add(getWeekStart(current));
+            current = current.plusDays(1);
+        }
+
+        // For each week, check if there are timesheet entries with PENDING or APPROVED status
+        for (LocalDate ws : weekStarts) {
+            LocalDate we = ws.plusDays(6);
+            List<Timesheet> weekEntries = timesheetRepository.findByEmployeeIdAndDateBetween(employeeId, ws, we);
+            
+            // Check if there are any PENDING or APPROVED entries in this week
+            boolean hasSubmittedOrApproved = weekEntries.stream().anyMatch(t -> 
+                t.getStatus() == TimesheetStatus.PENDING || t.getStatus() == TimesheetStatus.APPROVED
+            );
+
+            if (hasSubmittedOrApproved) {
+                for (Timesheet t : weekEntries) {
+                    if (t.getStatus() == TimesheetStatus.PENDING || t.getStatus() == TimesheetStatus.APPROVED) {
+                        t.setStatus(TimesheetStatus.REAPPLY_REQUESTED);
+                        t.setReapplyUsed(true);
+                        t.setManagerComments("System: Leave approved for dates in this week. Please resubmit.");
+                        timesheetRepository.save(t);
+                    }
+                }
+                
+                // Send a notification to the employee that their timesheet status changed to Reapply Requested
+                if (leave.getEmployee().getUser() != null) {
+                    String message = "Your timesheet for the week starting " + ws + " has been requested for resubmission due to approved leave.";
+                    notificationService.createNotification(
+                        leave.getEmployee().getUser().getId(),
+                        "Timesheet Reapply Requested",
+                        message,
+                        "TIMESHEET",
+                        null
+                    );
+                }
+            }
+        }
     }
 }
