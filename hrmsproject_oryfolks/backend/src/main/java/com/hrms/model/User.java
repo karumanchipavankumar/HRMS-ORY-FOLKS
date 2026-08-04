@@ -34,6 +34,8 @@ public class User {
     
     private String resetPasswordOtp;
     private LocalDateTime otpExpiry;
+
+    private Boolean passwordResetRequired = false;
     
     @PrePersist
     protected void onCreate() {
@@ -68,5 +70,8 @@ public class User {
     public void setResetPasswordOtp(String resetPasswordOtp) { this.resetPasswordOtp = resetPasswordOtp; }
     public LocalDateTime getOtpExpiry() { return otpExpiry; }
     public void setOtpExpiry(LocalDateTime otpExpiry) { this.otpExpiry = otpExpiry; }
+
+    public Boolean getPasswordResetRequired() { return passwordResetRequired; }
+    public void setPasswordResetRequired(Boolean passwordResetRequired) { this.passwordResetRequired = passwordResetRequired; }
 }
 

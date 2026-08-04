@@ -139,7 +139,9 @@ public class EmployeeController {
     @PostMapping
     @PreAuthorize("hasRole('ADMIN') or hasRole('HR')")
     public ResponseEntity<ApiResponse<EmployeeDTO>> createEmployee(
-            @RequestBody EmployeeDTO dto
+            @RequestBody EmployeeDTO dto,
+            @RequestHeader(value = "Origin", required = false) String origin,
+            @RequestHeader(value = "Referer", required = false) String referer
     ) {
         // Manual validation for debugging
         if (dto.getFirstName() == null || dto.getFirstName().trim().isEmpty()) {
@@ -155,7 +157,17 @@ public class EmployeeController {
                     .body(ApiResponse.error("Email is required"));
         }
         
-        EmployeeDTO created = employeeService.createEmployee(dto);
+        String clientUrl = origin;
+        if (clientUrl == null || clientUrl.isBlank()) {
+            if (referer != null && !referer.isBlank()) {
+                try {
+                    java.net.URI uri = new java.net.URI(referer);
+                    clientUrl = uri.getScheme() + "://" + uri.getAuthority();
+                } catch (Exception ignored) {}
+            }
+        }
+
+        EmployeeDTO created = employeeService.createEmployee(dto, clientUrl);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)

@@ -32,11 +32,18 @@ import com.hrms.model.LeaveStatus;
 import com.hrms.service.LeaveBalanceService;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+
+import com.hrms.repository.PasswordSetupTokenRepository;
+import com.hrms.model.PasswordSetupToken;
+import com.hrms.util.PasswordGenerator;
+import java.util.UUID;
+import java.time.LocalDateTime;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -87,6 +94,18 @@ public class EmployeeService {
     @Autowired
     private EmployeeReportingService reportingService;
 
+    @Autowired
+    private PasswordSetupTokenRepository passwordSetupTokenRepository;
+
+    @Autowired
+    private EmailService emailService;
+
+    @Autowired
+    private com.hrms.repository.NotificationRepository notificationRepository;
+
+    @Value("${app.frontend.url:http://localhost:3000}")
+    private String frontendUrl;
+
     // @Autowired
     // private DepartmentRepository departmentRepository; // PHASE 2
 
@@ -124,7 +143,7 @@ public class EmployeeService {
      * =========================
      */
 
-    public EmployeeDTO createEmployee(EmployeeDTO dto) {
+    public EmployeeDTO createEmployee(EmployeeDTO dto, String clientUrl) {
 
         if (employeeRepository.findByEmail(dto.getEmail()).isPresent()) {
             throw new ResponseStatusException(
@@ -230,17 +249,49 @@ public class EmployeeService {
                 userRole = Role.REPORTING_MANAGER;
             }
 
+            // Generate secure temporary password
+            String tempPassword = PasswordGenerator.generateSecurePassword();
+
             User user = new User();
             user.setUsername(username);
             user.setEmail(corporateEmail);
-            user.setPassword(passwordEncoder.encode("emp123")); // Default password
+            user.setPassword(passwordEncoder.encode(tempPassword)); // Hash temporary password using BCrypt
             user.setRole(userRole);
             user.setActive(true);
+            user.setPasswordResetRequired(true);
             User savedUser = userRepository.save(user);
 
             // Link to Employee
             saved.setUser(savedUser);
             employeeRepository.save(saved);
+
+            // Generate one-time onboarding token
+            String tokenValue = UUID.randomUUID().toString();
+            PasswordSetupToken token = new PasswordSetupToken(
+                tokenValue,
+                saved,
+                LocalDateTime.now().plusHours(24)
+            );
+            passwordSetupTokenRepository.save(token);
+
+            // Send onboarding welcome email asynchronously
+            String baseUrl = (clientUrl != null && !clientUrl.isBlank()) ? clientUrl : frontendUrl;
+            String setupLink = baseUrl.endsWith("/") 
+                ? baseUrl + "set-password?token=" + tokenValue
+                : baseUrl + "/set-password?token=" + tokenValue;
+
+            String employeeName = (saved.getFirstName() + " " + saved.getLastName()).trim();
+            String emailRecipient = (corporateEmail != null && !corporateEmail.isBlank()) 
+                ? corporateEmail 
+                : saved.getEmail();
+
+            emailService.sendWelcomeEmail(
+                emailRecipient,
+                employeeName,
+                username, // Login ID
+                tempPassword,
+                setupLink
+            );
         }
 
         // Initialize Leave Balance
@@ -565,12 +616,24 @@ public class EmployeeService {
 
             // 11. Delete linked user LAST (to avoid violating FK in other approvals before we cleared them)
             if (employee.getUser() != null) {
-                Long userId = employee.getUser().getId();
-                // We set user to null in employee first to avoid cyclical check
                 User userToDelete = employee.getUser();
+                
+                // Clear notifications of this user to avoid FK violations
+                List<com.hrms.model.Notification> notifications = notificationRepository.findByUserOrderByCreatedAtDesc(userToDelete);
+                if (notifications != null && !notifications.isEmpty()) {
+                    notificationRepository.deleteAll(notifications);
+                }
+
+                // We set user to null in employee first to avoid cyclical check
                 employee.setUser(null);
                 employeeRepository.save(employee);
                 userRepository.delete(userToDelete);
+            }
+
+            // 11.5 Delete password setup tokens of this employee to avoid FK violations
+            List<com.hrms.model.PasswordSetupToken> tokens = passwordSetupTokenRepository.findByEmployee(employee);
+            if (tokens != null && !tokens.isEmpty()) {
+                passwordSetupTokenRepository.deleteAll(tokens);
             }
 
             // 12. Finally delete employee

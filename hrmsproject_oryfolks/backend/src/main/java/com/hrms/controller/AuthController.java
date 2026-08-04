@@ -62,6 +62,13 @@ public class AuthController {
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username, password));
 
+            com.hrms.model.UserPrincipal principal = (com.hrms.model.UserPrincipal) authentication.getPrincipal();
+            User user = principal.getUser();
+            if (Boolean.TRUE.equals(user.getPasswordResetRequired())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Please set up your password using the onboarding email link first."));
+            }
+
             SecurityContextHolder.getContext().setAuthentication(authentication);
             String jwt = jwtUtils.generateJwtToken(authentication);
 

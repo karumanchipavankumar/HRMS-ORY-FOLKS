@@ -2,8 +2,8 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import 'react-toastify/dist/ReactToastify.css';
 import React from "react";
-// import LoginPage from "./components/LoginPage";
 import LoginPage from "./pages/login/LoginPage";
+import SetPasswordPage from "./pages/login/SetPasswordPage";
 import EmployeeDashboard from "./pages/employee/EmployeeDashboard";
 import EmployeeOwnProfile from "./pages/employee/EmployeeOwnProfile";
 import EmployeeTimesheet from "./pages/employee/EmployeeTimesheet";
@@ -74,8 +74,7 @@ function App() {
       <Routes>
         {/* Login */}
         <Route path="/login" element={<LoginPage setUser={setUser} />} />
-
-        {/* TEMP TEST ROUTES (work exactly like before) */}
+        <Route path="/set-password" element={<SetPasswordPage />} />
         <Route
           path="/employee"
           element={authLoading ? null : (user ? <EmployeeDashboard /> : <Navigate to="/login" />)}

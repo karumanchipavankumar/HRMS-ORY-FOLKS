@@ -12,6 +12,7 @@ import com.microsoft.graph.users.item.sendmail.SendMailPostRequestBody;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Async;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -96,6 +97,24 @@ public class EmailService {
             System.err.println("Failed to send email via Graph API: " + e.getMessage());
             // Optional: log full stack trace or throw exception if needed
         }
+    }
+
+    @Async
+    public void sendWelcomeEmail(String to, String employeeName, String loginId, String tempPassword, String setupLink) {
+        String subject = "Welcome to HRMS";
+        String body = "Hello " + employeeName + ",\n\n" +
+                "Your HRMS account has been created successfully.\n\n" +
+                "Login ID:\n" +
+                loginId + "\n\n" +
+                "Temporary Password:\n" +
+                tempPassword + "\n\n" +
+                "Please click the link below to create your own password:\n\n" +
+                setupLink + "\n\n" +
+                "This link is valid for 24 hours and can only be used once.\n\n" +
+                "If the link has expired, please contact your administrator.\n\n" +
+                "Regards,\n" +
+                "HRMS Team";
+        sendEmail(new String[] { to }, null, subject, body);
     }
 
     public void sendOtpEmail(String to, String otp) {

@@ -63,7 +63,8 @@ public class SecurityConfig {
                                                 .requestMatchers(
                                                                 "/api/login",
                                                                 "/api/auth/**",
-                                                                "/api/uploads/**")
+                                                                "/api/uploads/**",
+                                                                "/api/password/**")
                                                 .permitAll()
                                                 .requestMatchers(HttpMethod.GET, "/api/holidays/**").permitAll()
                                                 .requestMatchers(HttpMethod.POST, "/api/holidays/**").hasRole("ADMIN")
