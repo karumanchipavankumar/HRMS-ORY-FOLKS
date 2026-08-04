@@ -146,7 +146,7 @@ export default function DownloadTimesheetModal({ isOpen, onClose, employees }) {
                 const data = await leavesRes.json().catch(() => ({}));
                 allLeaves = Array.isArray(data.data) ? data.data : [];
             }
-            
+
             let allHolidays = [];
             if (holidaysRes.ok) {
                 const data = await holidaysRes.json().catch(() => ({}));
@@ -231,332 +231,346 @@ export default function DownloadTimesheetModal({ isOpen, onClose, employees }) {
         } catch (error) {
             console.error(error);
             toast.error("An unexpected error occurred during generation.");
-        } finally {
+} finally {
             setGenerating(false);
         }
     };
 
     const downloadExcel = async (dateSequence, selectedIds, dateFilteredEntries, allLeaves, allHolidays) => {
         const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet("Timesheet");
-
-        // Format dates for title
-        const sD = new Date(fromDate);
-        const eD = new Date(toDate);
-        const monthYear = sD.toLocaleDateString("en-US", { month: "long", year: "numeric" }).toUpperCase();
-        const startStr = sD.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-        const endStr = eD.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-
-        // Determine columns
-        const colCount = 6 + dateSequence.length + 6;
-
-        // ROW 1
-        worksheet.mergeCells(1, 1, 1, colCount);
-        const row1 = worksheet.getRow(1);
-        row1.getCell(1).value = `ORYFOLKS PAYROLL SYSTEM — MONTHLY ATTENDANCE RECORD — ${monthYear} (Cycle: ${startStr} → ${endStr})`;
-        row1.height = 30;
-        row1.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
-        row1.getCell(1).font = { color: { argb: "FF000000" }, bold: true, size: 14 };
-        row1.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
-
-        // ROW 2
-        worksheet.mergeCells(2, 1, 2, colCount);
-        const row2 = worksheet.getRow(2);
-        row2.getCell(1).value = "P = Present   A = Absent   LOP = Loss Of Pay   HD = Half Day   WO = Week Off   PH = Public Holiday   |   Sat&Sun auto-marked WO   |   Source: Manual Upload";
-        row2.height = 20;
-        row2.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6B8B7" } };
-        row2.getCell(1).font = { color: { argb: "FF000000" }, size: 10 };
-        row2.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
-
-        // ROW 3
-        worksheet.mergeCells(3, 1, 3, 6); // Employee Info
-        const row3 = worksheet.getRow(3);
-        row3.getCell(1).value = "EMPLOYEE INFORMATION";
-        row3.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC4BD97" } };
-        row3.getCell(1).font = { color: { argb: "FF000000" }, bold: true };
-        row3.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
-
-        worksheet.mergeCells(3, 7, 3, 6 + dateSequence.length); // Day wise attendance
-        row3.getCell(7).value = `DAY WISE ATTENDANCE (${startStr} → ${endStr})`;
-        row3.getCell(7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC4BD97" } };
-        row3.getCell(7).font = { color: { argb: "FF000000" }, bold: true };
-        row3.getCell(7).alignment = { horizontal: "center", vertical: "middle" };
-
-        worksheet.mergeCells(3, 7 + dateSequence.length, 3, colCount); // Monthly Summary
-        row3.getCell(7 + dateSequence.length).value = "MONTHLY SUMMARY";
-        row3.getCell(7 + dateSequence.length).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC4BD97" } };
-        row3.getCell(7 + dateSequence.length).font = { color: { argb: "FF000000" }, bold: true };
-        row3.getCell(7 + dateSequence.length).alignment = { horizontal: "center", vertical: "middle" };
-
-        // ROW 4 & 5
-        const row4 = worksheet.getRow(4);
-        const row5 = worksheet.getRow(5);
-
-        const baseHeaders = ["S.No", "Emp ID", "Name", "Department", "Month", "Year"];
-        const summaryHeaders = ["Working Days", "Leave days", "Holidays", "WeekOff days", "LOP", "Att%"];
-
-        baseHeaders.forEach((h, i) => {
-            row4.getCell(i + 1).value = h;
-            row5.getCell(i + 1).value = h;
-            // Left-align the Name (col 3) and Department (col 4) headers; center the rest.
-            const leftAlign = (i + 1 === 3 || i + 1 === 4);
-            [row4, row5].forEach(r => {
-                const c = r.getCell(i + 1);
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF95B3D7" } };
-                c.font = { bold: true };
-                c.alignment = { horizontal: leftAlign ? "left" : "center", vertical: "middle" };
-                c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-            });
-        });
-
-        dateSequence.forEach((ds, i) => {
-            const colIdx = 7 + i;
+        
+        const monthsGrouped = {};
+        const monthKeys = [];
+        dateSequence.forEach(ds => {
             const d = new Date(ds);
-            const dayNum = d.getDate();
-            const dayStr = d.toLocaleDateString("en-US", { weekday: 'short' }).substring(0, 2);
-            row4.getCell(colIdx).value = dayNum;
-            row5.getCell(colIdx).value = dayStr;
-            [row4, row5].forEach(r => {
-                const c = r.getCell(colIdx);
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF95B3D7" } };
-                c.font = { bold: true };
-                c.alignment = { horizontal: "center", vertical: "middle" };
-                c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-            });
+            const monthName = d.toLocaleDateString("en-US", { month: "long" });
+            const year = d.getFullYear();
+            const key = `${monthName} ${year}`;
+            if (!monthsGrouped[key]) {
+                monthsGrouped[key] = {
+                    monthName,
+                    year,
+                    dates: []
+                };
+                monthKeys.push(key);
+            }
+            monthsGrouped[key].dates.push(ds);
         });
 
-        summaryHeaders.forEach((h, i) => {
-            const colIdx = 7 + dateSequence.length + i;
-            row4.getCell(colIdx).value = h;
-            row5.getCell(colIdx).value = h;
-            [row4, row5].forEach(r => {
-                const c = r.getCell(colIdx);
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
-                c.font = { bold: true };
-                c.alignment = { horizontal: "center", vertical: "middle" };
-                c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        const uniqueYears = Array.from(new Set(dateSequence.map(ds => new Date(ds).getFullYear())));
+        const useYearInSheetName = uniqueYears.length > 1;
+
+        monthKeys.forEach((key) => {
+            const group = monthsGrouped[key];
+            const dates = group.dates;
+            
+            const sheetName = useYearInSheetName 
+                ? `${group.monthName} ${group.year}`
+                : group.monthName;
+
+            const worksheet = workbook.addWorksheet(sheetName);
+
+            const sD = new Date(dates[0]);
+            const eD = new Date(dates[dates.length - 1]);
+            const monthYear = sD.toLocaleDateString("en-US", { month: "long", year: "numeric" }).toUpperCase();
+            const startStr = sD.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            const endStr = eD.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+            const colCount = 6 + dates.length + 6;
+
+            worksheet.mergeCells(1, 1, 1, colCount);
+            const row1 = worksheet.getRow(1);
+            row1.getCell(1).value = `ORYFOLKS PAYROLL SYSTEM — MONTHLY ATTENDANCE RECORD — ${monthYear} (Cycle: ${startStr} → ${endStr})`;
+            row1.height = 30;
+            row1.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
+            row1.getCell(1).font = { color: { argb: "FF000000" }, bold: true, size: 14 };
+            row1.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+            worksheet.mergeCells(2, 1, 2, colCount);
+            const row2 = worksheet.getRow(2);
+            row2.getCell(1).value = "P = Present   A = Absent   LOP = Loss Of Pay   HD = Half Day   WO = Week Off   PH = Public Holiday   |   Sat&Sun auto-marked WO   |   Source: Manual Upload";
+            row2.height = 20;
+            row2.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6B8B7" } };
+            row2.getCell(1).font = { color: { argb: "FF000000" }, size: 10 };
+            row2.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+            worksheet.mergeCells(3, 1, 3, 6);
+            const row3 = worksheet.getRow(3);
+            row3.getCell(1).value = "EMPLOYEE INFORMATION";
+            row3.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC4BD97" } };
+            row3.getCell(1).font = { color: { argb: "FF000000" }, bold: true };
+            row3.getCell(1).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+
+            worksheet.mergeCells(3, 7, 3, 6 + dates.length);
+            row3.getCell(7).value = `DAY WISE ATTENDANCE (${startStr} → ${endStr})`;
+            row3.getCell(7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC4BD97" } };
+            row3.getCell(7).font = { color: { argb: "FF000000" }, bold: true };
+            row3.getCell(7).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+
+            worksheet.mergeCells(3, 7 + dates.length, 3, colCount);
+            row3.getCell(7 + dates.length).value = "MONTHLY SUMMARY";
+            row3.getCell(7 + dates.length).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC4BD97" } };
+            row3.getCell(7 + dates.length).font = { color: { argb: "FF000000" }, bold: true };
+            row3.getCell(7 + dates.length).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+
+            const row4 = worksheet.getRow(4);
+            const row5 = worksheet.getRow(5);
+
+            const baseHeaders = ["S.No", "Emp ID", "Name", "Department", "Month", "Year"];
+            const summaryHeaders = ["Working Days", "Leave days", "Holidays", "WeekOff days", "LOP", "Att%"];
+
+            baseHeaders.forEach((h, i) => {
+                row4.getCell(i + 1).value = h;
+                row5.getCell(i + 1).value = h;
+                const leftAlign = (i + 1 === 3 || i + 1 === 4);
+                [row4, row5].forEach(r => {
+                    const c = r.getCell(i + 1);
+                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF95B3D7" } };
+                    c.font = { bold: true };
+                    c.alignment = { horizontal: leftAlign ? "left" : "center", vertical: "middle" };
+                    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                });
             });
-        });
 
-        // Set column widths
-        worksheet.getColumn(1).width = 6;
-        worksheet.getColumn(2).width = 12;
-        worksheet.getColumn(3).width = 25;
-        worksheet.getColumn(4).width = 20;
-        worksheet.getColumn(5).width = 10;
-        worksheet.getColumn(6).width = 8;
-        for (let i = 0; i < dateSequence.length; i++) {
-            worksheet.getColumn(7 + i).width = 4;
-        }
-        for (let i = 0; i < summaryHeaders.length; i++) {
-            worksheet.getColumn(7 + dateSequence.length + i).width = 12;
-        }
+            dates.forEach((ds, i) => {
+                const colIdx = 7 + i;
+                const d = new Date(ds);
+                const dayNum = d.getDate();
+                const dayStr = d.toLocaleDateString("en-US", { weekday: 'short' }).substring(0, 2);
+                row4.getCell(colIdx).value = dayNum;
+                row5.getCell(colIdx).value = dayStr;
+                [row4, row5].forEach(r => {
+                    const c = r.getCell(colIdx);
+                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF95B3D7" } };
+                    c.font = { bold: true };
+                    c.alignment = { horizontal: "center", vertical: "middle" };
+                    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                });
+            });
 
-        // Freeze panes — freeze ONLY the top 3 rows (main heading, legend, section
-        // headers). Row 4 onward (column headers + all data rows/columns) scrolls normally.
-        worksheet.views = [
-            { state: 'frozen', xSplit: 0, ySplit: 3, topLeftCell: 'A4', activeCell: 'A4' }
-        ];
+            summaryHeaders.forEach((h, i) => {
+                const colIdx = 7 + dates.length + i;
+                row4.getCell(colIdx).value = h;
+                row5.getCell(colIdx).value = h;
+                [row4, row5].forEach(r => {
+                    const c = r.getCell(colIdx);
+                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
+                    c.font = { bold: true };
+                    c.alignment = { horizontal: "center", vertical: "middle" };
+                    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                });
+            });
 
-        // Process data
-        selectedIds.forEach((empId, empIdx) => {
-            const emp = eligibleEmployees.find(e => e.id === empId);
-            const rowIdx = 6 + empIdx;
-            const r = worksheet.getRow(rowIdx);
-            
-            r.getCell(1).value = empIdx + 1;
-            r.getCell(2).value = emp?.oryfolksId || `EMP${empId}`;
-            r.getCell(3).value = `${emp?.firstName || ""} ${emp?.lastName || ""}`.trim();
-            r.getCell(4).value = emp?.department || "Engineering";
-            r.getCell(5).value = sD.toLocaleDateString("en-US", { month: "short" });
-            r.getCell(6).value = sD.getFullYear();
-            
-            for(let i=1; i<=6; i++) {
-                const c = r.getCell(i);
-                // Left-align Name (col 3) and Department (col 4) values; center the rest.
-                c.alignment = { vertical: 'middle', horizontal: (i === 3 || i === 4) ? 'left' : 'center' };
-                c.font = { bold: i <= 3 };
-                c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-                if (i <= 4) {
-                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE4DFEC" } }; // A-D (S.No, Emp Code, Name, Dept)
-                } else {
-                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEBE4A9" } }; // E-F (Month, Year)
-                }
+            worksheet.getColumn(1).width = 6;
+            worksheet.getColumn(2).width = 12;
+            worksheet.getColumn(3).width = 25;
+            worksheet.getColumn(4).width = 20;
+            worksheet.getColumn(5).width = 10;
+            worksheet.getColumn(6).width = 8;
+            const headerText = `DAY WISE ATTENDANCE (${startStr} → ${endStr})`;
+            const minHeaderWidth = headerText.length + 4;
+            const dayColWidth = Math.max(4, Math.ceil(minHeaderWidth / dates.length));
+
+            for (let i = 0; i < dates.length; i++) {
+                worksheet.getColumn(7 + i).width = dayColWidth;
+            }
+            for (let i = 0; i < summaryHeaders.length; i++) {
+                worksheet.getColumn(7 + dates.length + i).width = 12;
             }
 
-            let presDays = 0, leaveDays = 0, holidays = 0, weekOffs = 0, lops = 0;
-            const leaveReasons = [];
+            worksheet.views = [
+                { state: 'frozen', xSplit: 0, ySplit: 3, topLeftCell: 'A4', activeCell: 'A4' }
+            ];
 
-            dateSequence.forEach((ds, i) => {
-                const colIdx = 7 + i;
-                const c = r.getCell(colIdx);
-                const dayEntries = dateFilteredEntries.filter(e => e.employeeId === empId && e.date === ds);
+            selectedIds.forEach((empId, empIdx) => {
+                const emp = eligibleEmployees.find(e => e.id === empId);
+                const rowIdx = 6 + empIdx;
+                const r = worksheet.getRow(rowIdx);
                 
-                const d = new Date(ds);
-                const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                r.getCell(1).value = empIdx + 1;
+                r.getCell(2).value = emp?.oryfolksId || `EMP${empId}`;
+                r.getCell(3).value = `${emp?.firstName || ""} ${emp?.lastName || ""}`.trim();
+                r.getCell(4).value = emp?.department || "Engineering";
+                r.getCell(5).value = sD.toLocaleDateString("en-US", { month: "short" });
+                r.getCell(6).value = sD.getFullYear();
                 
-                let cellValue = isWeekend ? "WO" : "";
-                let comment = "";
-                let bgColor = isWeekend ? "FFD9D9D9" : "FFFFFFFF";
-                
-                let isSL = false, isCL = false, isEL = false, isLOP = false, isHalfDay = false, isWorked = false, isHoliday = false;
-                
-                // Fetch details from API data
-                let holidayName = "";
-                const matchingHoliday = allHolidays.find(h => {
-                    // h.holidayDate can be YYYY-MM-DD
-                    const hDate = h.holidayDate ? h.holidayDate.split('T')[0] : "";
-                    return hDate === ds;
-                });
-                if (matchingHoliday) {
-                    holidayName = matchingHoliday.holidayName;
+                for(let i=1; i<=6; i++) {
+                    const c = r.getCell(i);
+                    c.alignment = { vertical: 'middle', horizontal: (i === 3 || i === 4) ? 'left' : 'center' };
+                    c.font = { bold: i <= 3 };
+                    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                    if (i <= 4) {
+                        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE4DFEC" } };
+                    } else {
+                        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEBE4A9" } };
+                    }
                 }
 
-                let leaveReason = "";
-                const matchingLeave = allLeaves.find(l => {
-                    if (l.employeeId !== empId || l.status !== 'APPROVED') return false;
-                    const lStart = l.startDate ? l.startDate.split('T')[0] : "";
-                    const lEnd = l.endDate ? l.endDate.split('T')[0] : "";
-                    return ds >= lStart && ds <= lEnd;
-                });
-                if (matchingLeave) {
-                    leaveReason = matchingLeave.reason || "";
-                }
+                let presDays = 0, leaveDays = 0, holidays = 0, weekOffs = 0, lops = 0;
+                const leaveReasons = [];
 
-                dayEntries.forEach(entry => {
-                    const cat = String(entry.category || "").toUpperCase();
-                    if (cat === 'LEAVE') {
-                        if (entry.totalHours == 4) isHalfDay = true;
-                        
-                        const lType = String(entry.leaveType || "").toUpperCase();
-                        const pName = String(entry.projectName || "").toUpperCase();
-                        
-                        if (lType === 'S' || pName.includes('SICK')) isSL = true;
-                        else if (lType === 'C' || pName.includes('CASUAL')) isCL = true;
-                        else if (lType === 'E' || pName.includes('EARNED')) isEL = true;
-                        else if (lType === 'L' || pName.includes('LOP')) isLOP = true;
-                        
-                        // Fallback to timesheet entry reason if not found in leaves table
-                        const reasonText = entry.taskDescription || entry.notes || entry.reason || "";
-                        if (!leaveReason && reasonText && reasonText !== "-") leaveReason = reasonText;
-                        
-                    } else if (cat === 'HOLIDAY') {
-                        isHoliday = true;
-                        if (!holidayName) {
-                            holidayName = entry.projectName || entry.project || "Public Holiday";
+                dates.forEach((ds, i) => {
+                    const colIdx = 7 + i;
+                    const c = r.getCell(colIdx);
+                    const dayEntries = dateFilteredEntries.filter(e => e.employeeId === empId && e.date === ds);
+                    
+                    const d = new Date(ds);
+                    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                    
+                    let cellValue = isWeekend ? "WO" : "";
+                    let comment = "";
+                    let bgColor = isWeekend ? "FFD9D9D9" : "FFFFFFFF";
+                    
+                    let isSL = false, isCL = false, isEL = false, isLOP = false, isHalfDay = false, isWorked = false, isHoliday = false;
+                    
+                    let holidayName = "";
+                    const matchingHoliday = allHolidays.find(h => {
+                        const hDate = h.holidayDate ? h.holidayDate.split('T')[0] : "";
+                        return hDate === ds;
+                    });
+                    if (matchingHoliday) {
+                        holidayName = matchingHoliday.holidayName;
+                    }
+
+                    let leaveReason = "";
+                    const matchingLeave = allLeaves.find(l => {
+                        if (l.employeeId !== empId || l.status !== 'APPROVED') return false;
+                        const lStart = l.startDate ? l.startDate.split('T')[0] : "";
+                        const lEnd = l.endDate ? l.endDate.split('T')[0] : "";
+                        return ds >= lStart && ds <= lEnd;
+                    });
+                    if (matchingLeave) {
+                        leaveReason = matchingLeave.reason || "";
+                    }
+
+                    dayEntries.forEach(entry => {
+                        const cat = String(entry.category || "").toUpperCase();
+                        if (cat === 'LEAVE') {
+                            if (entry.totalHours == 4) isHalfDay = true;
+                            
+                            const lType = String(entry.leaveType || "").toUpperCase();
+                            const pName = String(entry.projectName || "").toUpperCase();
+                            
+                            if (lType === 'S' || pName.includes('SICK')) isSL = true;
+                            else if (lType === 'C' || pName.includes('CASUAL')) isCL = true;
+                            else if (lType === 'E' || pName.includes('EARNED')) isEL = true;
+                            else if (lType === 'L' || pName.includes('LOP')) isLOP = true;
+                            
+                            const reasonText = entry.taskDescription || entry.notes || entry.reason || "";
+                            if (!leaveReason && reasonText && reasonText !== "-") leaveReason = reasonText;
+                            
+                        } else if (cat === 'HOLIDAY') {
+                            isHoliday = true;
+                            if (!holidayName) {
+                                holidayName = entry.projectName || entry.project || "Public Holiday";
+                            }
+                        } else if (cat === 'PROJECT' || cat === 'TRUTIME' || (entry.totalHours > 0 && cat !== 'LEAVE')) {
+                            isWorked = true;
                         }
-                    } else if (cat === 'PROJECT' || cat === 'TRUTIME' || (entry.totalHours > 0 && cat !== 'LEAVE')) {
-                        isWorked = true;
+                    });
+
+                    if (isHoliday) { 
+                        cellValue = "PH"; 
+                        comment = holidayName; 
+                        bgColor = "FFFFC000"; 
+                        holidays++; 
+                    } else if (isHalfDay || isSL || isCL || isEL || isLOP) {
+                        let typeName = "Leave";
+                        if (isSL) typeName = "Sick Leave";
+                        else if (isCL) typeName = "Casual Leave";
+                        else if (isEL) typeName = "Earned Leave";
+                        else if (isLOP) typeName = "Loss of Pay";
+
+                        let cStr = `Leave type: ${typeName}`;
+                        if (isHalfDay) {
+                            let hdType = "Half Day";
+                            if (matchingLeave && matchingLeave.sessionData && matchingLeave.sessionData[ds]) {
+                                const sess = matchingLeave.sessionData[ds];
+                                if (sess === 'MORNING') hdType = "Morning Half";
+                                    else if (sess === 'AFTERNOON') hdType = "Afternoon Half";
+                            }
+                            cStr += `\nHalf day: ${hdType}`;
+                        }
+                        
+                        cStr += `\nReason: ${leaveReason || "-"}`;
+                        comment = cStr;
+                        bgColor = "FFE26B0A";
+                        
+                        if (isHalfDay) {
+                            cellValue = "HL"; 
+                            leaveDays += 0.5; 
+                            leaveReasons.push(`${ds} - Half Day Leave (${leaveReason || "-"})`); 
+                        } else if (isSL) { 
+                            cellValue = "A"; 
+                            leaveDays++; 
+                            leaveReasons.push(`${ds} - Sick Leave (${leaveReason || "-"})`); 
+                        } else if (isCL) { 
+                            cellValue = "A"; 
+                            leaveDays++; 
+                            leaveReasons.push(`${ds} - Casual Leave (${leaveReason || "-"})`); 
+                        } else if (isEL) { 
+                            cellValue = "A"; 
+                            leaveDays++; 
+                            leaveReasons.push(`${ds} - Earned Leave (${leaveReason || "-"})`); 
+                        } else if (isLOP) { 
+                            cellValue = "LOP"; 
+                            lops++; 
+                            leaveReasons.push(`${ds} - Loss of Pay (${leaveReason || "-"})`); 
+                        }
+                    } else if (isWorked) { 
+                        cellValue = "P"; 
+                        comment = ""; 
+                        bgColor = "FFC4D79B"; 
+                        presDays++; 
+                    } else if (isWeekend) { 
+                        cellValue = "WO"; 
+                        comment = ""; 
+                        bgColor = "FFD9D9D9"; 
+                        weekOffs++; 
+                    } else { 
+                        cellValue = ""; 
+                        comment = ""; 
+                        bgColor = "FFFFFFFF"; 
+                    }
+                    
+                    c.value = cellValue;
+                    c.alignment = { horizontal: "center", vertical: "middle" };
+                    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
+                    if (comment) {
+                        c.note = comment;
                     }
                 });
 
-                if (isHoliday) { 
-                    cellValue = "PH"; 
-                    comment = holidayName; 
-                    bgColor = "FFFFC000"; 
-                    holidays++; 
-                } else if (isHalfDay || isSL || isCL || isEL || isLOP) {
-                    let typeName = "Leave";
-                    if (isSL) typeName = "Sick Leave";
-                    else if (isCL) typeName = "Casual Leave";
-                    else if (isEL) typeName = "Earned Leave";
-                    else if (isLOP) typeName = "Loss of Pay";
-
-                    let cStr = `Leave type: ${typeName}`;
-                    if (isHalfDay) {
-                        let hdType = "Half Day";
-                        if (matchingLeave && matchingLeave.sessionData && matchingLeave.sessionData[ds]) {
-                            const sess = matchingLeave.sessionData[ds];
-                            if (sess === 'MORNING') hdType = "Morning Half";
-                            else if (sess === 'AFTERNOON') hdType = "Afternoon Half";
-                        }
-                        cStr += `\nHalf day: ${hdType}`;
-                    }
-                    
-                    // Always show the reason line to maintain consistent format across all leaves
-                    cStr += `\nReason: ${leaveReason || "-"}`;
-                    
-                    comment = cStr;
-
-                    bgColor = "FFE26B0A"; // All leave boxes
-                    
-                    if (isHalfDay) {
-                        cellValue = "HL"; 
-                        leaveDays += 0.5; 
-                        leaveReasons.push(`${ds} - Half Day Leave (${leaveReason || "-"})`); 
-                    } else if (isSL) { 
-                        cellValue = "A"; 
-                        leaveDays++; 
-                        leaveReasons.push(`${ds} - Sick Leave (${leaveReason || "-"})`); 
-                    } else if (isCL) { 
-                        cellValue = "A"; 
-                        leaveDays++; 
-                        leaveReasons.push(`${ds} - Casual Leave (${leaveReason || "-"})`); 
-                    } else if (isEL) { 
-                        cellValue = "A"; 
-                        leaveDays++; 
-                        leaveReasons.push(`${ds} - Earned Leave (${leaveReason || "-"})`); 
-                    } else if (isLOP) { 
-                        cellValue = "LOP"; 
-                        lops++; 
-                        leaveReasons.push(`${ds} - Loss of Pay (${leaveReason || "-"})`); 
-                    }
-                } else if (isWorked) { 
-                    cellValue = "P"; 
-                    comment = ""; 
-                    bgColor = "FFC4D79B"; 
-                    presDays++; 
-                } else if (isWeekend) { 
-                    cellValue = "WO"; 
-                    comment = ""; 
-                    bgColor = "FFD9D9D9"; 
-                    weekOffs++; 
-                } else { 
-                    cellValue = ""; 
-                    comment = ""; 
-                    bgColor = "FFFFFFFF"; 
-                } // Blank for no entry
+                const totalWorkingDays = dates.length - weekOffs - holidays;
+                const attPerc = totalWorkingDays > 0 ? (presDays / totalWorkingDays) * 100 : 0;
                 
-                c.value = cellValue;
-                c.alignment = { horizontal: "center", vertical: "middle" };
-                c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
-                if (comment) {
-                    c.note = comment;
-                }
-            });
-
-            // Summary
-            const totalWorkingDays = dateSequence.length - weekOffs - holidays;
-            const attPerc = totalWorkingDays > 0 ? (presDays / totalWorkingDays) * 100 : 0;
-            
-            const sumStart = 7 + dateSequence.length;
-            const summaries = [presDays, leaveDays, holidays, weekOffs, lops, `${attPerc.toFixed(1)}%`];
-            
-            summaries.forEach((val, i) => {
-                const c = r.getCell(sumStart + i);
-                c.value = val;
-                c.alignment = { horizontal: "center", vertical: "middle" };
-                c.font = { bold: true };
-                c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
-                c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                const sumStart = 7 + dates.length;
+                const summaries = [presDays, leaveDays, holidays, weekOffs, lops, `${attPerc.toFixed(1)}%`];
                 
-                // Add leave summary comment
-                if (i === 1 && leaveReasons.length > 0) { // Leave days
-                    c.note = leaveReasons.join('\n');
-                }
+                summaries.forEach((val, i) => {
+                    const c = r.getCell(sumStart + i);
+                    c.value = val;
+                    c.alignment = { horizontal: "center", vertical: "middle" };
+                    c.font = { bold: true };
+                    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
+                    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+                    
+                    if (i === 1 && leaveReasons.length > 0) {
+                        c.note = leaveReasons.join('\n');
+                    }
+                });
             });
         });
 
-        // Add Legend Sheet
         const legendSheet = workbook.addWorksheet("Legend");
         legendSheet.getColumn(1).width = 20;
         legendSheet.getColumn(2).width = 15;
         legendSheet.getColumn(3).width = 40;
-        
+
         legendSheet.getRow(1).values = ["Day Type", "Cell Value", "Background Color"];
         legendSheet.getRow(1).font = { bold: true };
-        
+
         const legends = [
             ["Present / Working Day", "P", "FFC4D79B"],
             ["Weekend (Sat & Sun)", "WO", "FFD9D9D9"],
